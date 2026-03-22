@@ -55,6 +55,42 @@ feeds:
 
 Edit **`config/interests.md`** — describe what you want to read. This is the prompt fed to Claude for scoring. Be specific: name topics, methods, labs, and things you explicitly don't want. The quality of scoring depends directly on this file.
 
+<details>
+<summary>Example interests.md</summary>
+
+```markdown
+## Research Interests
+
+### Core topics
+
+- Visual cortex circuits in mice — response properties, layer and cell-type specificity, feedforward and feedback pathways
+- How interneuron subtypes (PV, SST, VIP) shape cortical gain, selectivity, and network dynamics
+- Population coding and dimensionality in visual cortex during perception and behavior
+- Top-down modulation of sensory cortex — attention, locomotion, arousal state effects on V1/HVA responses
+
+### Methods I follow
+
+- Two-photon calcium imaging and large-scale Neuropixels recordings in behaving mice
+- Optogenetic dissection of specific cell types or pathways during visual tasks
+- Computational models of visual cortical circuits
+
+### Labs I follow
+
+- Mark Hübener, Tobias Bonhoeffer
+- Karel Svoboda
+- Yang Dan
+- Massimo Scanziani
+
+### Explicitly NOT interested in
+
+- Human or primate visual neuroscience unless methods are directly transferable to mice
+- MRI or EEG-based studies
+- Clinical or disease contexts
+- Pure psychophysics without a neural circuit component
+```
+
+</details>
+
 ### 3. Run
 
 ```bash
