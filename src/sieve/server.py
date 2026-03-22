@@ -46,6 +46,24 @@ def toggle_seen(body: DoiBody):
         return {"status": "error", "detail": str(e)}
 
 
+@app.post("/toggle-rl-read")
+def toggle_rl_read(body: DoiBody):
+    try:
+        new_val = db.toggle_rl_read(body.doi)
+        return {"status": "ok", "rl_read": new_val}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+
+@app.post("/mark-all-rl-read")
+def mark_all_rl_read():
+    try:
+        count = db.mark_all_rl_read()
+        return {"status": "ok", "count": count}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+
 @app.post("/toggle-reading-list")
 def toggle_reading_list(body: DoiBody):
     try:

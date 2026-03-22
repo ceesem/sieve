@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS papers (
     match_basis     TEXT,
     seen            INTEGER DEFAULT 0,
     reading_list    INTEGER DEFAULT 0,
+    rl_read         INTEGER DEFAULT 0,
     notes           TEXT,
     fetched_at      TEXT
 );
@@ -40,10 +41,14 @@ def _connect() -> sqlite3.Connection:
 
 
 def _migrate(conn: sqlite3.Connection) -> None:
-    try:
-        conn.execute("ALTER TABLE papers ADD COLUMN match_basis TEXT")
-    except sqlite3.OperationalError:
-        pass  # column already exists
+    for ddl in [
+        "ALTER TABLE papers ADD COLUMN match_basis TEXT",
+        "ALTER TABLE papers ADD COLUMN rl_read INTEGER DEFAULT 0",
+    ]:
+        try:
+            conn.execute(ddl)
+        except sqlite3.OperationalError:
+            pass  # column already exists
 
 
 def init_db() -> None:
@@ -148,6 +153,27 @@ def toggle_seen(doi: str) -> int:
         ]
 
 
+def toggle_rl_read(doi: str) -> int:
+    """Toggle rl_read state. Returns new rl_read value (0 or 1)."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE papers SET rl_read = CASE WHEN rl_read = 1 THEN 0 ELSE 1 END WHERE doi = ?",
+            (doi,),
+        )
+        return conn.execute(
+            "SELECT rl_read FROM papers WHERE doi = ?", (doi,)
+        ).fetchone()[0]
+
+
+def mark_all_rl_read() -> int:
+    """Mark all reading list papers as rl_read. Returns count updated."""
+    with _connect() as conn:
+        conn.execute(
+            "UPDATE papers SET rl_read = 1 WHERE reading_list = 1 AND rl_read = 0"
+        )
+        return conn.execute("SELECT changes()").fetchone()[0]
+
+
 def toggle_reading_list(doi: str) -> None:
     with _connect() as conn:
         conn.execute(
@@ -194,6 +220,9 @@ def get_summary(display_threshold: int = 7) -> dict:
         unread = conn.execute("SELECT COUNT(*) FROM papers WHERE seen = 0").fetchone()[
             0
         ]
+        rl_unread = conn.execute(
+            "SELECT COUNT(*) FROM papers WHERE reading_list = 1 AND rl_read = 0"
+        ).fetchone()[0]
         high_score = conn.execute(
             "SELECT COUNT(*) FROM papers WHERE score >= ?", (display_threshold,)
         ).fetchone()[0]
@@ -202,6 +231,7 @@ def get_summary(display_threshold: int = 7) -> dict:
     return {
         "total": total,
         "unread": unread,
+        "rl_unread": rl_unread,
         "high_score": high_score,
         "last_fetched": last_fetched,
     }
