@@ -1,0 +1,600 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Literature Sieve</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* Catppuccin Latte (light) */
+:root {
+  --bg: #e6e9ef;
+  --fg: #1e1e2e;
+  --muted: #4c4f69;
+  --border: #ccd0da;
+  --card-bg: #eff1f5;
+  --sidebar-bg: #dce0e8;
+  --green: #40a02b;
+  --green-bg: #d9f0d3;
+  --amber: #df8e1d;
+  --amber-bg: #f5e4c0;
+  --grey: #8c8fa1;
+  --grey-bg: #bcc0cc;
+  --seen-bg: #dce0e8;
+  --accent: #1e66f5;
+  --accent-light: #e4ebfe;
+  --reading-list: #8839ef;
+  --unread: #ea76cb;
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: "SF Mono", "Fira Code", Menlo, monospace;
+  --radius: 8px;
+  --radius-sm: 5px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 8px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.04);
+}
+
+/* Catppuccin Macchiato (dark) */
+[data-theme="dark"] {
+  --bg: #1e2030;
+  --fg: #eef0ff;
+  --muted: #cad3f5;
+  --border: #363a4f;
+  --card-bg: #24273a;
+  --sidebar-bg: #181926;
+  --green: #a6da95;
+  --green-bg: #243329;
+  --amber: #eed49f;
+  --amber-bg: #332e1e;
+  --grey: #6e738d;
+  --grey-bg: #363a4f;
+  --seen-bg: #1e2030;
+  --accent: #8aadf4;
+  --accent-light: #2a2f4a;
+  --reading-list: #c6a0f6;
+  --unread: #f5bde6;
+  --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-md: 0 4px 8px rgba(0,0,0,0.3), 0 2px 4px rgba(0,0,0,0.2);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: var(--font); background: var(--bg); color: var(--fg); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; transition: background 0.2s, color 0.2s; }
+.theme-toggle { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 10px; font-size: 12px; font-family: var(--font); color: var(--muted); cursor: pointer; transition: border-color 0.12s, color 0.12s; }
+.theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+
+.container { max-width: 1240px; margin: 0 auto; padding: 28px 32px; }
+
+header { padding-bottom: 18px; margin-bottom: 24px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; justify-content: space-between; }
+.header-left h1 { font-size: 19px; font-weight: 800; letter-spacing: -0.6px; color: var(--fg); }
+.summary { font-size: 11.5px; color: var(--muted); margin-top: 5px; font-family: var(--mono); letter-spacing: 0.1px; }
+
+.layout { display: flex; align-items: flex-start; }
+
+.sidebar { width: 204px; flex-shrink: 0; position: sticky; top: 28px; max-height: calc(100vh - 56px); overflow-y: auto; background: var(--sidebar-bg); border-radius: var(--radius); padding: 16px 14px; }
+
+.nav { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
+.nav-btn { display: block; width: 100%; text-align: left; padding: 7px 10px; border: none; background: none; cursor: pointer; font-size: 13px; font-weight: 600; font-family: var(--font); color: var(--muted); border-radius: var(--radius-sm); margin-bottom: 2px; transition: background 0.12s, color 0.12s; }
+.nav-btn.active { color: var(--accent); background: var(--accent-light); }
+.nav-btn:hover:not(.active) { color: var(--fg); background: rgba(0,0,0,0.06); }
+
+.filters { display: flex; flex-direction: column; gap: 14px; }
+.filters label { color: var(--muted); font-weight: 600; font-size: 10px; text-transform: uppercase; letter-spacing: 0.7px; display: block; margin-bottom: 5px; }
+.filters select, .filters input[type="text"] { padding: 5px 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 12px; font-family: var(--font); background: var(--card-bg); width: 100%; color: var(--fg); transition: border-color 0.12s; }
+.filters select:focus, .filters input[type="text"]:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-light); }
+.filters input[type="range"] { width: 100%; accent-color: var(--accent); }
+.filter-group { display: flex; flex-direction: column; }
+.score-row { display: flex; align-items: center; gap: 7px; }
+.score-val { font-family: var(--mono); font-weight: 700; font-size: 13px; min-width: 16px; color: var(--fg); }
+.source-checks { display: flex; flex-direction: column; gap: 6px; margin-top: 2px; }
+.source-checks label { font-size: 12px; font-weight: 500; text-transform: none; letter-spacing: 0; color: var(--fg); display: flex; align-items: center; gap: 7px; cursor: pointer; margin-bottom: 0; }
+.source-checks input[type="checkbox"] { cursor: pointer; accent-color: var(--accent); width: 13px; height: 13px; }
+.sidebar-action { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border); }
+.sidebar-action button { width: 100%; padding: 7px 10px; font-size: 12px; font-family: var(--font); font-weight: 500; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--card-bg); cursor: pointer; color: var(--muted); text-align: left; transition: border-color 0.12s, color 0.12s; }
+.sidebar-action button:hover { border-color: var(--accent); color: var(--accent); }
+
+.content { flex: 1; min-width: 0; padding-left: 28px; }
+.paper-count { font-size: 11px; color: var(--muted); margin-bottom: 14px; font-family: var(--mono); }
+
+.paper { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 10px; box-shadow: var(--shadow); transition: box-shadow 0.15s; }
+.paper:hover { box-shadow: var(--shadow-md); }
+.paper.seen { background: var(--seen-bg); border-color: var(--border); box-shadow: none; }
+.paper.seen .paper-title a { color: var(--muted); }
+.paper.on-reading-list { border-left: 3px solid var(--reading-list); }
+.paper.unread { border-right: 3px solid var(--unread); }
+
+.paper-header { display: flex; gap: 14px; align-items: flex-start; }
+.score-badge { font-size: 17px; font-weight: 800; font-family: var(--mono); min-width: 40px; text-align: center; padding: 5px 6px; border-radius: var(--radius-sm); line-height: 1.2; flex-shrink: 0; }
+.score-high { color: var(--green); background: var(--green-bg); }
+.score-mid { color: var(--amber); background: var(--amber-bg); }
+.score-low { color: var(--grey); background: var(--grey-bg); }
+
+.paper-body { flex: 1; min-width: 0; }
+.paper-title { font-weight: 700; font-size: 15px; line-height: 1.35; }
+.paper-title a { color: var(--fg); text-decoration: none; transition: color 0.12s; }
+.paper-title a:hover { color: var(--accent); }
+.paper-meta { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+.source-badge { display: inline-block; background: var(--grey-bg); border: 1px solid var(--border); padding: 0px 7px; border-radius: 20px; font-size: 11px; font-weight: 600; color: var(--muted); }
+.doi-copy { font-family: var(--mono); font-size: 11px; color: var(--muted); cursor: pointer; border: none; background: none; padding: 0; transition: color 0.12s; }
+.doi-copy:hover { color: var(--accent); text-decoration: underline; }
+
+.paper-reason { margin-top: 9px; font-size: 13px; color: var(--fg); font-style: italic; line-height: 1.55; padding-left: 10px; border-left: 2px solid var(--border); }
+
+.paper-abstract { margin-top: 10px; font-size: 13px; color: var(--muted); line-height: 1.6; display: none; }
+.paper-abstract.open { display: block; }
+.toggle-abstract { font-size: 11.5px; color: var(--accent); cursor: pointer; background: none; border: none; padding: 0; margin-top: 6px; font-weight: 500; font-family: var(--font); transition: opacity 0.12s; }
+.toggle-abstract:hover { opacity: 0.7; }
+
+.actions { display: flex; gap: 6px; margin-top: 11px; align-items: center; flex-wrap: wrap; }
+.actions button { font-size: 11.5px; font-family: var(--font); font-weight: 500; padding: 3px 11px; border: 1px solid var(--border); border-radius: 20px; background: transparent; cursor: pointer; color: var(--muted); transition: border-color 0.12s, color 0.12s, background 0.12s; }
+.actions button:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
+.actions button.active { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
+.actions button:disabled { opacity: 0.35; cursor: default; }
+
+.note-area { margin-top: 10px; width: 100%; }
+.note-area textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; font-family: var(--font); resize: vertical; min-height: 56px; transition: border-color 0.12s; color: var(--fg); }
+.note-area textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-light); }
+.note-saved { font-size: 11px; color: var(--green); margin-left: 6px; opacity: 0; transition: opacity 0.3s; }
+.note-saved.show { opacity: 1; }
+
+.empty { text-align: center; padding: 60px; color: var(--muted); font-size: 13px; }
+
+.paper.selected { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+</style>
+</head>
+<body>
+<div class="container">
+  <header>
+    <div class="header-left">
+      <h1>Literature Sieve</h1>
+      <div class="summary">
+        {{ summary.unread }} unread · {{ summary.high_score }} scored &ge;{{ display_threshold }} · last fetched {{ summary.last_fetched or 'never' }} · generated {{ generated_at }}
+      </div>
+    </div>
+    <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()">☀︎ Light</button>
+  </header>
+
+  <div class="layout">
+    <div class="sidebar">
+      <nav class="nav">
+        <button class="nav-btn active" id="tab-feed" onclick="switchTab('feed')">Feed</button>
+        <button class="nav-btn" id="tab-reading-list" onclick="switchTab('reading-list')">Reading List</button>
+      </nav>
+
+      <!-- Feed filters -->
+      <div class="filters" id="feed-filters">
+        <div class="filter-group">
+          <label>Score &ge;</label>
+          <div class="score-row">
+            <input type="range" id="f-score" min="1" max="10" value="{{ display_threshold }}">
+            <span class="score-val" id="f-score-val">{{ display_threshold }}</span>
+          </div>
+        </div>
+        <div class="filter-group">
+          <label>Source</label>
+          <div class="source-checks">
+            <label><input type="checkbox" id="f-src-biorxiv" checked> bioRxiv</label>
+            <label><input type="checkbox" id="f-src-arxiv" checked> arXiv</label>
+            <label><input type="checkbox" id="f-src-feed" checked> Journals</label>
+            <label><input type="checkbox" id="f-src-cite" checked> Citations</label>
+          </div>
+        </div>
+        <div class="filter-group">
+          <label>Show</label>
+          <select id="f-status">
+            <option value="all" selected>All</option>
+            <option value="unread">Unread</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Days</label>
+          <select id="f-days">
+            <option value="7">7</option>
+            <option value="14">14</option>
+            <option value="30" selected>30</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Sort</label>
+          <select id="f-sort">
+            <option value="score">Score</option>
+            <option value="fetched" selected>Fetched</option>
+            <option value="published">Published</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Search</label>
+          <input type="text" id="f-search" placeholder="Title or reason…">
+        </div>
+        <div class="sidebar-action">
+          <button class="server-only" id="mark-all-btn" onclick="markAllSeen()">Mark all read</button>
+        </div>
+      </div>
+
+      <!-- Reading list filters -->
+      <div class="filters" id="rl-filters" style="display:none">
+        <div class="filter-group">
+          <label>Score &ge;</label>
+          <div class="score-row">
+            <input type="range" id="rl-score" min="1" max="10" value="1">
+            <span class="score-val" id="rl-score-val">1</span>
+          </div>
+        </div>
+        <div class="filter-group">
+          <label>Source</label>
+          <div class="source-checks">
+            <label><input type="checkbox" id="rl-src-biorxiv" checked> bioRxiv</label>
+            <label><input type="checkbox" id="rl-src-arxiv" checked> arXiv</label>
+            <label><input type="checkbox" id="rl-src-feed" checked> Journals</label>
+            <label><input type="checkbox" id="rl-src-cite" checked> Citations</label>
+          </div>
+        </div>
+        <div class="filter-group">
+          <label>Show</label>
+          <select id="rl-status">
+            <option value="all" selected>All</option>
+            <option value="unread">Unread</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Days</label>
+          <select id="rl-days">
+            <option value="7">7</option>
+            <option value="14">14</option>
+            <option value="30">30</option>
+            <option value="90">90</option>
+            <option value="180">180</option>
+            <option value="365">365</option>
+            <option value="all" selected>All</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Sort</label>
+          <select id="rl-sort">
+            <option value="score">Score</option>
+            <option value="fetched" selected>Fetched</option>
+            <option value="published">Published</option>
+          </select>
+        </div>
+        <div class="filter-group">
+          <label>Search</label>
+          <input type="text" id="rl-search" placeholder="Title or reason…">
+        </div>
+        <div class="sidebar-action">
+          <button class="server-only" onclick="markAllSeen()">Mark all read</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="content">
+      <div class="paper-count" id="paper-count"></div>
+      <div id="paper-list"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+const PAPERS = {{ papers_json | safe }};
+let serverAvailable = false;
+let activeTab = 'feed';
+let selectedDoi = null;
+
+// Theme
+(function() {
+  const saved = localStorage.getItem('theme');
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const theme = saved || (prefersDark ? 'dark' : 'light');
+  if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+  updateThemeBtn(theme);
+})();
+
+function updateThemeBtn(theme) {
+  const btn = document.getElementById('theme-toggle');
+  if (btn) btn.textContent = theme === 'dark' ? '☀︎ Light' : '☽ Dark';
+}
+
+function toggleTheme() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const next = isDark ? 'light' : 'dark';
+  if (next === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+  else document.documentElement.removeAttribute('data-theme');
+  localStorage.setItem('theme', next);
+  updateThemeBtn(next);
+}
+
+function switchTab(tab) {
+  activeTab = tab;
+  selectedDoi = null;
+  document.getElementById('tab-feed').classList.toggle('active', tab === 'feed');
+  document.getElementById('tab-reading-list').classList.toggle('active', tab === 'reading-list');
+  document.getElementById('feed-filters').style.display = tab === 'feed' ? '' : 'none';
+  document.getElementById('rl-filters').style.display = tab === 'reading-list' ? '' : 'none';
+  render();
+}
+
+async function checkServer() {
+  try {
+    const r = await fetch('/regenerate', {method: 'POST'});
+    serverAvailable = r.ok;
+  } catch { serverAvailable = false; }
+  if (!serverAvailable) {
+    document.querySelectorAll('.server-only').forEach(el => {
+      el.disabled = true;
+      el.title = 'Start sieve-serve to enable';
+    });
+  }
+  render();
+}
+checkServer();
+
+function scoreClass(s) {
+  if (s >= 8) return 'score-high';
+  if (s >= 6) return 'score-mid';
+  return 'score-low';
+}
+
+function fmtAuthors(authors) {
+  if (!authors || !authors.length) return '';
+  if (authors.length <= 3) return authors.join(', ');
+  const senior = authors[authors.length - 1];
+  const last = senior.includes(',') ? senior.split(',')[0].trim() : senior.split(' ').pop();
+  return authors.slice(0, 3).join(', ') + ` et al. (${last} lab)`;
+}
+
+function activeSources(prefix) {
+  const s = new Set();
+  if (document.getElementById(prefix + '-src-biorxiv').checked) s.add('biorxiv');
+  if (document.getElementById(prefix + '-src-arxiv').checked) s.add('arxiv');
+  if (document.getElementById(prefix + '-src-feed').checked) s.add('feed');
+  if (document.getElementById(prefix + '-src-cite').checked) s.add('cite');
+  return s;
+}
+
+function sortPapers(arr, sort) {
+  if (sort === 'fetched') arr.sort((a, b) => (b.fetched_at || '').localeCompare(a.fetched_at || ''));
+  else if (sort === 'published') arr.sort((a, b) => (b.published_date || '').localeCompare(a.published_date || ''));
+  else arr.sort((a, b) => (b.score || 0) - (a.score || 0));
+}
+
+function render() {
+  let filtered;
+  if (activeTab === 'reading-list') {
+    const minScore = +document.getElementById('rl-score').value;
+    document.getElementById('rl-score-val').textContent = minScore;
+    const sources = activeSources('rl');
+    const status = document.getElementById('rl-status').value;
+    const days = document.getElementById('rl-days').value;
+    const sort = document.getElementById('rl-sort').value;
+    const search = document.getElementById('rl-search').value.toLowerCase();
+    const cutoff = days === 'all' ? null : (() => { const d = new Date(); d.setDate(d.getDate() - +days); return d; })();
+    filtered = PAPERS.filter(p => {
+      if (!p.reading_list) return false;
+      if ((p.score || 0) < minScore) return false;
+      if (!sources.has(p.source)) return false;
+      if (status === 'unread' && p.seen) return false;
+      if (cutoff && p.fetched_at && new Date(p.fetched_at) < cutoff) return false;
+      if (search && !(p.title || '').toLowerCase().includes(search) && !(p.reason || '').toLowerCase().includes(search)) return false;
+      return true;
+    });
+    sortPapers(filtered, sort);
+  } else {
+    const minScore = +document.getElementById('f-score').value;
+    document.getElementById('f-score-val').textContent = minScore;
+    const sources = activeSources('f');
+    const status = document.getElementById('f-status').value;
+    const days = +document.getElementById('f-days').value;
+    const sort = document.getElementById('f-sort').value;
+    const search = document.getElementById('f-search').value.toLowerCase();
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    filtered = PAPERS.filter(p => {
+      if ((p.score || 0) < minScore) return false;
+      if (!sources.has(p.source)) return false;
+      if (status === 'unread' && p.seen) return false;
+      if (p.fetched_at && new Date(p.fetched_at) < cutoff) return false;
+      if (search && !(p.title || '').toLowerCase().includes(search) && !(p.reason || '').toLowerCase().includes(search)) return false;
+      return true;
+    });
+    sortPapers(filtered, sort);
+  }
+
+  document.getElementById('paper-count').textContent = `${filtered.length} paper${filtered.length !== 1 ? 's' : ''}`;
+
+  const list = document.getElementById('paper-list');
+  if (!filtered.length) {
+    list.innerHTML = '<div class="empty">No papers match filters.</div>';
+    return;
+  }
+
+  const srv = serverAvailable;
+  list.innerHTML = filtered.map((p, i) => {
+    const sc = scoreClass(p.score);
+    const seenCls = p.seen ? ' seen' : '';
+    const rlCls = p.reading_list ? ' on-reading-list' : '';
+    const unreadCls = !p.seen ? ' unread' : '';
+    const url = p.url || (p.doi && !p.doi.startsWith('arxiv:') ? `https://doi.org/${p.doi}` : p.url);
+    const dis = srv ? '' : ' disabled title="Start sieve-serve to enable"';
+    return `
+    <div class="paper${seenCls}${rlCls}${unreadCls}" data-idx="${i}" data-doi="${p.doi}">
+      <div class="paper-header">
+        <div class="score-badge ${sc}">${p.score || '?'}</div>
+        <div class="paper-body">
+          <div class="paper-title"><a href="${url}" target="_blank" rel="noopener">${p.title}</a></div>
+          <div class="paper-meta">
+            ${fmtAuthors(p.authors)} · ${p.published_date || ''} · <span class="source-badge">${p.journal || p.source}</span> · <button class="doi-copy" onclick="copyDoi(event, '${p.doi}')" title="Copy DOI">${p.doi}</button>
+          </div>
+          ${p.reason ? `<div class="paper-reason">${p.reason}</div>` : ''}
+          ${p.abstract ? `<button class="toggle-abstract" onclick="toggleAbstract(this)">abstract</button><div class="paper-abstract">${p.abstract}</div>` : ''}
+          <div class="actions">
+            <button onclick="toggleSeen('${p.doi}', this)"${dis}>${p.seen ? 'Mark unread' : 'Mark seen'}</button>
+            <button class="${p.reading_list ? 'active' : ''}" onclick="toggleRL('${p.doi}', this)"${dis}>${p.reading_list ? 'On list' : 'Reading list'}</button>
+            <button onclick="showNote('${p.doi}', this)"${dis}>Note</button>
+            <button class="server-only" onclick="sendToZotero('${p.doi}', this)"${dis}>Zotero</button>
+          </div>
+          ${p.notes ? `<div class="note-area"><textarea onblur="saveNote('${p.doi}', this)">${p.notes}</textarea></div>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  // Re-apply selection and click-to-select
+  list.querySelectorAll('.paper').forEach(el => {
+    if (el.dataset.doi === selectedDoi) el.classList.add('selected');
+    el.addEventListener('click', e => {
+      if (e.target.closest('a, button, textarea')) return;
+      list.querySelectorAll('.paper.selected').forEach(p => p.classList.remove('selected'));
+      el.classList.add('selected');
+      selectedDoi = el.dataset.doi;
+    });
+  });
+}
+
+function copyDoi(e, doi) {
+  e.stopPropagation();
+  navigator.clipboard.writeText(doi).then(() => {
+    const btn = e.target;
+    const orig = btn.textContent;
+    btn.textContent = 'copied!';
+    setTimeout(() => { btn.textContent = orig; }, 1200);
+  });
+}
+
+function toggleAbstract(btn) {
+  const abs = btn.nextElementSibling;
+  abs.classList.toggle('open');
+  btn.textContent = abs.classList.contains('open') ? 'hide abstract' : 'abstract';
+}
+
+async function markSeen(doi, btn) {
+  try {
+    await fetch('/mark-seen', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({doi})});
+    const p = PAPERS.find(x => x.doi === doi);
+    if (p) p.seen = 1;
+    btn.textContent = 'Seen';
+    btn.closest('.paper').classList.add('seen');
+    btn.closest('.paper').classList.remove('unread');
+  } catch {}
+}
+
+async function toggleSeen(doi, btn) {
+  try {
+    const r = await fetch('/toggle-seen', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({doi})});
+    const data = await r.json();
+    const p = PAPERS.find(x => x.doi === doi);
+    if (p) p.seen = data.seen;
+    btn.textContent = data.seen ? 'Mark unread' : 'Mark seen';
+    btn.closest('.paper').classList.toggle('seen', !!data.seen);
+    btn.closest('.paper').classList.toggle('unread', !data.seen);
+  } catch {}
+}
+
+async function toggleRL(doi, btn) {
+  try {
+    await fetch('/toggle-reading-list', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({doi})});
+    const p = PAPERS.find(x => x.doi === doi);
+    if (p) p.reading_list = p.reading_list ? 0 : 1;
+    btn.classList.toggle('active');
+    btn.textContent = p.reading_list ? 'On list' : 'Reading list';
+    btn.closest('.paper').classList.toggle('on-reading-list');
+    if (activeTab === 'reading-list' && !p.reading_list) render();
+  } catch {}
+}
+
+function showNote(doi, btn) {
+  const card = btn.closest('.paper');
+  if (card.querySelector('.note-area')) return;
+  const p = PAPERS.find(x => x.doi === doi);
+  const div = document.createElement('div');
+  div.className = 'note-area';
+  div.innerHTML = `<textarea onblur="saveNote('${doi}', this)">${p && p.notes ? p.notes : ''}</textarea><span class="note-saved">saved</span>`;
+  card.querySelector('.paper-body').appendChild(div);
+  div.querySelector('textarea').focus();
+}
+
+async function markAllSeen() {
+  try {
+    await fetch('/mark-all-seen', {method: 'POST'});
+    PAPERS.forEach(p => { p.seen = 1; });
+    render();
+  } catch {}
+}
+
+async function saveNote(doi, ta) {
+  try {
+    await fetch('/set-note', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({doi, note: ta.value})});
+    const p = PAPERS.find(x => x.doi === doi);
+    if (p) p.notes = ta.value;
+    const saved = ta.parentElement.querySelector('.note-saved');
+    if (saved) { saved.classList.add('show'); setTimeout(() => saved.classList.remove('show'), 1500); }
+  } catch {}
+}
+
+
+async function sendToZotero(doi, btn) {
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '…';
+  try {
+    const r = await fetch('/send-to-zotero', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({doi})});
+    btn.textContent = r.ok ? 'Sent!' : 'Failed';
+  } catch {
+    btn.textContent = 'Failed';
+  }
+  setTimeout(() => { btn.textContent = orig; btn.disabled = false; }, 2000);
+}
+
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') return;
+  if (!['j', 'k', 'l', 'i', 'Enter'].includes(e.key)) return;
+  const papers = Array.from(document.querySelectorAll('#paper-list .paper'));
+  if (!papers.length) return;
+  const currentEl = papers.find(p => p.dataset.doi === selectedDoi) ?? null;
+  const currentIdx = currentEl ? papers.indexOf(currentEl) : -1;
+
+  if (e.key === 'j' || e.key === 'k') {
+    e.preventDefault();
+    const nextIdx = e.key === 'j'
+      ? (currentIdx < papers.length - 1 ? currentIdx + 1 : 0)
+      : (currentIdx > 0 ? currentIdx - 1 : papers.length - 1);
+    papers.forEach(p => p.classList.remove('selected'));
+    papers[nextIdx].classList.add('selected');
+    selectedDoi = papers[nextIdx].dataset.doi;
+    papers[nextIdx].scrollIntoView({block: 'nearest'});
+  } else if (e.key === 'l' && currentEl) {
+    e.preventDefault();
+    const btn = currentEl.querySelector('button[onclick^="toggleRL"]');
+    if (btn && !btn.disabled) btn.click();
+  } else if (e.key === 'i' && currentEl) {
+    e.preventDefault();
+    const btn = currentEl.querySelector('button[onclick^="sendToZotero"]');
+    if (btn && !btn.disabled) btn.click();
+  } else if (e.key === 'Enter' && currentEl) {
+    e.preventDefault();
+    const link = currentEl.querySelector('.paper-title a');
+    if (link) window.open(link.href, '_blank', 'noopener');
+  }
+});
+
+document.getElementById('f-score').addEventListener('input', render);
+document.getElementById('f-src-biorxiv').addEventListener('change', render);
+document.getElementById('f-src-arxiv').addEventListener('change', render);
+document.getElementById('f-src-feed').addEventListener('change', render);
+document.getElementById('f-src-cite').addEventListener('change', render);
+document.getElementById('f-status').addEventListener('change', render);
+document.getElementById('f-days').addEventListener('change', render);
+document.getElementById('f-sort').addEventListener('change', render);
+document.getElementById('f-search').addEventListener('input', render);
+document.getElementById('rl-score').addEventListener('input', render);
+document.getElementById('rl-src-biorxiv').addEventListener('change', render);
+document.getElementById('rl-src-arxiv').addEventListener('change', render);
+document.getElementById('rl-src-feed').addEventListener('change', render);
+document.getElementById('rl-src-cite').addEventListener('change', render);
+document.getElementById('rl-status').addEventListener('change', render);
+document.getElementById('rl-days').addEventListener('change', render);
+document.getElementById('rl-sort').addEventListener('change', render);
+document.getElementById('rl-search').addEventListener('input', render);
+
+render();
+</script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: 1.0.8
+_src_path: gh:ceesem/cave-copier
+directory_name: sieve
+project_description: Literature Sieve
+project_name: Sieve
+project_slug: sieve
+python_version: '3.13'
+template_type: tabula-rasa
+use_vim_jupyter: true
+user_email: caseysm@gmail.com
+user_name: Casey Schneider-Mizell

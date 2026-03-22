@@ -1,0 +1,24 @@
+lookback_days: 2
+
+store_threshold: 5
+display_threshold: 7
+site_threshold: 4
+
+batch_size: 30
+sonnet_batch_size: 40
+
+biorxiv_category: neuroscience
+
+arxiv_categories:
+  - q-bio.NC
+
+# Email for OpenAlex polite pool (optional but recommended)
+mailto: "you@example.com"
+
+feeds:
+  - name: "Nature Neuroscience"
+    url: "https://www.nature.com/neuro.rss"
+  - name: "Nature"
+    url: "https://www.nature.com/nature.rss"
+
+max_papers_per_source: 500

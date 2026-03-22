@@ -1,0 +1,57 @@
+[build-system]
+requires = ["uv_build>=0.9.5,<1.0.0"]
+build-backend = "uv_build"
+
+[project]
+name = "sieve"
+version = "0.0.0"
+description = "Literature Sieve"
+
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.135.1",
+    "feedparser>=6.0.12",
+    "httpx>=0.28.1",
+    "jinja2>=3.1.6",
+    "pyyaml>=6.0.3",
+    "rich>=13.0.0",
+    "uvicorn>=0.42.0",
+]
+authors = [
+    { name = "Casey Schneider-Mizell", email = "caseysm@gmail.com" },
+]
+
+[project.scripts]
+sieve-run = "sieve.cli:run"
+sieve-serve = "sieve.cli:serve"
+sieve-seed = "sieve.cli:seed_cli"
+sieve-clean = "sieve.cli:clean"
+sieve-cite = "sieve.cli:cite_cli"
+
+[dependency-groups]
+dev = [
+    "ipykernel",
+]
+lint = [
+    "ruff",
+]
+
+[tool.uv]
+default-groups = [
+    "dev",
+    "lint",
+]
+
+# Ruff configuration - minimal rules to start
+# See https://docs.astral.sh/ruff/rules/ for available rules
+# Common additions: select = ["E", "F", "I"] for errors, pyflakes, and isort
+[tool.ruff]
+extend-exclude = ["*.ipynb"]
+
+[tool.ruff.lint]
+select=["E9","F63","F7","F82"]  # Minimal: syntax errors and undefined names
+
+[tool.poe.tasks.lab]
+cmd = "uv run --with jupyterlab --with jupyterlab-vim --with jupyterlab-code-formatter --with jupyter-resource-usage --with jupyterlab-execute-time --with catppuccin-jupyterlab --with ipywidgets jupyter lab --no-browser"
+help = "Start Jupyter Lab"
+
