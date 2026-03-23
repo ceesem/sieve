@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Literature Sieve</title>
+<link rel="icon" type="image/svg+xml" href="/favicon.svg">
+<link rel="icon" type="image/png" sizes="64x64" href="/favicon.png">
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -66,8 +69,9 @@ body { font-family: var(--font); background: var(--bg); color: var(--fg); font-s
 .container { max-width: 1240px; margin: 0 auto; padding: 28px 32px; }
 
 header { padding-bottom: 18px; margin-bottom: 24px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; justify-content: space-between; }
-.header-left h1 { font-size: 19px; font-weight: 800; letter-spacing: -0.6px; color: var(--fg); }
-.summary { font-size: 11.5px; color: var(--muted); margin-top: 5px; font-family: var(--mono); letter-spacing: 0.1px; }
+.header-left { display: flex; align-items: center; gap: 10px; }
+.header-left h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.6px; color: var(--fg); line-height: 1.2; }
+.summary { font-size: 11.5px; color: var(--muted); margin-top: 2px; font-family: var(--mono); letter-spacing: 0.1px; }
 
 .layout { display: flex; align-items: flex-start; }
 
@@ -183,9 +187,10 @@ kbd { display: inline-block; padding: 1px 6px; border: 1px solid var(--border); 
 <div class="container">
   <header>
     <div class="header-left">
-      <h1>Literature Sieve</h1>
-      <div class="summary">
-        {{ summary.unread }} unread · {{ summary.rl_unread }} to read · {{ summary.high_score }} scored &ge;{{ display_threshold }} · last fetched {{ summary.last_fetched or 'never' }} · generated {{ generated_at }}
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="42" height="42" style="flex-shrink:0;border-radius:7px"><defs><linearGradient id="hbg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#1e66f5"/><stop offset="100%" stop-color="#8839ef"/></linearGradient><linearGradient id="hfg" x1="100%" y1="100%" x2="0%" y2="0%"><stop offset="0%" stop-color="#1e66f5"/><stop offset="100%" stop-color="#8839ef"/></linearGradient></defs><rect width="32" height="32" rx="7" fill="url(#hbg)"/><path d="M7 9h18l-7 9v6l-4-2v-4z" fill="url(#hfg)" stroke="white" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>
+      <div>
+        <h1>Literature Sieve</h1>
+        <div class="summary">{{ summary.unread }} unread on feed · {{ summary.rl_unread }} unread on list · {{ summary.high_score }} scored &ge;{{ display_threshold }} · last fetched {{ summary.last_fetched or 'never' }} · generated {{ generated_at }}</div>
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;">

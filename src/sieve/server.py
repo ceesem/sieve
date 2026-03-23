@@ -28,6 +28,21 @@ def index():
     return FileResponse(str(SITE_DIR / "index.html"))
 
 
+@app.get("/favicon.svg")
+def favicon_svg():
+    return FileResponse(str(SITE_DIR / "favicon.svg"), media_type="image/svg+xml")
+
+
+@app.get("/favicon.png")
+def favicon_png():
+    return FileResponse(str(SITE_DIR / "favicon.png"), media_type="image/png")
+
+
+@app.get("/favicon.ico")
+def favicon_ico():
+    return FileResponse(str(SITE_DIR / "favicon.ico"), media_type="image/x-icon")
+
+
 @app.post("/mark-seen")
 def mark_seen(body: DoiBody):
     try:

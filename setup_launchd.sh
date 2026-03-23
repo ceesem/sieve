@@ -42,6 +42,8 @@ fi
 
 mkdir -p "$LOG_DIR"
 
+CURRENT_PATH="$(bash -lc 'echo $PATH')"
+
 cat > "$PLIST" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
@@ -58,6 +60,12 @@ cat > "$PLIST" <<EOF
 
     <key>WorkingDirectory</key>
     <string>${SIEVE_DIR}</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>${CURRENT_PATH}</string>
+    </dict>
 
     <key>StartCalendarInterval</key>
     <dict>

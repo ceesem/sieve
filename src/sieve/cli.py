@@ -17,7 +17,7 @@ from .settings import load_settings
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
-    datefmt="%H:%M:%S",
+    datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger(__name__)
 
@@ -98,6 +98,7 @@ def run() -> None:
         settings.site_threshold = args.site_threshold
     db.init_db()
 
+    logger.info("sieve-run started")
     _logging.getLogger("sieve").setLevel(_logging.WARNING)
     _logging.getLogger("httpx").setLevel(_logging.WARNING)
 

@@ -5,6 +5,7 @@ from datetime import date, timedelta
 
 import feedparser
 import httpx
+from tenacity import before_sleep_log, retry, stop_after_attempt, wait_exponential
 
 from .db import get_existing_dois
 from .normalize import normalize_paper
@@ -12,7 +13,41 @@ from .settings import Settings
 
 logger = logging.getLogger(__name__)
 
+_retry = retry(
+    stop=stop_after_attempt(3),
+    wait=wait_exponential(multiplier=2, min=4, max=30),
+    reraise=True,
+    before_sleep=before_sleep_log(logger, logging.WARNING),
+)
+
 DOI_RE = re.compile(r"(10\.\d{4,9}/[^\s\"<>]+)")
+
+_AFFILIATION_KEYWORDS = re.compile(
+    r"(?:University|Institute|Department|School|Center|Laboratory|"
+    r"College|Hospital|National|Research|Sciences?|Technology|Foundation)"
+)
+
+
+def _split_concatenated_authors(raw: str) -> list[str]:
+    """Handle feeds (e.g. PNAS) that concatenate authors+affiliations into one string.
+
+    Splits at CamelCase boundaries, stops when address-like affiliation text is
+    detected, and strips trailing superscript affiliation markers (a, b, c...).
+    """
+    parts = re.split(r"(?<=[a-z])(?=[A-Z][a-z])", raw)
+    names = []
+    for p in parts:
+        # Stop when we hit affiliation text: long string with commas or institution keywords
+        if ("," in p and len(p) > 30) or (
+            _AFFILIATION_KEYWORDS.search(p) and len(p) > 20
+        ):
+            # Strip the affiliation superscript only from the last name before the block
+            if names:
+                names[-1] = re.sub(r"\s*[a-e]$", "", names[-1]).strip()
+            break
+        if p.strip():
+            names.append(p.strip())
+    return [n for n in names if n]
 
 
 def fetch_biorxiv(settings: Settings) -> list[dict]:
@@ -25,7 +60,7 @@ def fetch_biorxiv(settings: Settings) -> list[dict]:
     while len(papers) < settings.max_papers_per_source:
         url = f"https://api.biorxiv.org/details/biorxiv/{start}/{end}/{cursor}/json"
         try:
-            resp = client.get(url)
+            resp = _retry(client.get)(url)
             resp.raise_for_status()
             data = resp.json()
         except Exception as e:
@@ -74,7 +109,8 @@ def _fetch_arxiv_category(cat: str) -> list[dict]:
     """Fetch and parse a single arXiv RSS category. Returns list of papers."""
     url = f"https://rss.arxiv.org/rss/{cat}"
     try:
-        feed = feedparser.parse(url)
+        resp = _retry(httpx.get)(url, timeout=30)
+        feed = feedparser.parse(resp.text)
     except Exception as e:
         logger.error(f"arXiv RSS error for {cat}: {e}")
         return []
@@ -133,7 +169,7 @@ def fetch_arxiv(settings: Settings) -> list[dict]:
 def _fetch_single_feed(feed_conf, client: httpx.Client) -> list[dict]:
     """Fetch and parse a single RSS feed. Returns list of papers."""
     try:
-        resp = client.get(feed_conf.url)
+        resp = _retry(client.get)(feed_conf.url)
         feed = feedparser.parse(resp.text)
     except Exception as e:
         logger.error(f"Feed error for {feed_conf.name}: {e}")
@@ -167,6 +203,9 @@ def _fetch_single_feed(feed_conf, client: httpx.Client) -> list[dict]:
                 authors.append(name)
         if not authors and entry.get("author"):
             authors = [entry["author"]]
+        # Some feeds (e.g. PNAS) concatenate all authors+affiliations into one string
+        if len(authors) == 1 and _AFFILIATION_KEYWORDS.search(authors[0]):
+            authors = _split_concatenated_authors(authors[0])
 
         feed_papers.append(
             {
