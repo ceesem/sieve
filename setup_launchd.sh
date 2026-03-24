@@ -10,7 +10,7 @@ set -euo pipefail
 LABEL="com.sieve.run"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 SIEVE_DIR="$(cd "$(dirname "$0")" && pwd)"
-SIEVE_BIN="${SIEVE_DIR}/.venv/bin/sieve-run"
+SIEVE_BIN="${SIEVE_DIR}/.venv/bin/sieve"
 LOG_DIR="${SIEVE_DIR}/data/logs"
 HOUR=6
 MINUTE=0
@@ -35,7 +35,7 @@ done
 
 # Validate
 if [[ ! -x "$SIEVE_BIN" ]]; then
-    echo "Error: sieve-run not found at $SIEVE_BIN"
+    echo "Error: sieve not found at $SIEVE_BIN"
     echo "Run 'uv sync' first."
     exit 1
 fi
@@ -56,6 +56,7 @@ cat > "$PLIST" <<EOF
     <key>ProgramArguments</key>
     <array>
         <string>${SIEVE_BIN}</string>
+        <string>run</string>
     </array>
 
     <key>WorkingDirectory</key>

@@ -14,9 +14,11 @@ uv run ruff format src/
 
 | Command | Description |
 |---------|-------------|
-| `sieve-run` | Fetch → score → ingest → generate static site |
-| `sieve-serve` | Start FastAPI server + open browser |
-| `sieve-seed --doi <DOI>` | Evaluate a paper and optionally update interests |
+| `sieve run` | Fetch → score → ingest → generate static site |
+| `sieve serve` | Start FastAPI server + open browser |
+| `sieve seed --doi <DOI>` | Evaluate a paper and optionally update interests |
+| `sieve cite --doi <DOI>` | Fetch and score a citation graph |
+| `sieve clean` | Prune low-score papers outside fetch window |
 | `poe lab` | Launch Jupyter Lab |
 
 ## Architecture & Key Files
@@ -33,7 +35,7 @@ src/sieve/
   ingest.py           # Atomic DB ingest (papers + scores in one tx)
   generate.py         # Jinja2 → site/index.html
   server.py           # FastAPI write-back endpoints
-  cli.py              # Entry points: run(), serve(), seed_cli()
+  cli.py              # Entry point: main() with subcommands run/serve/seed/cite/clean
   seed.py             # Seed paper evaluation workflow
   templates/
     index.html.j2     # Self-contained HTML/CSS/JS template
@@ -60,4 +62,4 @@ Scoring invokes `claude -p` with batches of ~30 papers. Papers + scores are inse
 - Atomic ingest: `insert_papers_with_scores()` handles both in one transaction
 - Per-batch error handling in scoring: if one batch fails, others still run
 - Server returns `{status: ok/error}` with HTTP 200 for all POSTs
-- Static site works read-only without server; actions need `sieve-serve`
+- Static site works read-only without server; actions need `sieve serve`

@@ -23,11 +23,7 @@ authors = [
 ]
 
 [project.scripts]
-sieve-run = "sieve.cli:run"
-sieve-serve = "sieve.cli:serve"
-sieve-seed = "sieve.cli:seed_cli"
-sieve-clean = "sieve.cli:clean"
-sieve-cite = "sieve.cli:cite_cli"
+sieve = "sieve.cli:main"
 
 [dependency-groups]
 dev = [

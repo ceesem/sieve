@@ -63,7 +63,7 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 body { font-family: var(--font); background: var(--bg); color: var(--fg); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; transition: background 0.2s, color 0.2s; }
-.theme-toggle { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 4px 10px; font-size: 12px; font-family: var(--font); color: var(--muted); cursor: pointer; transition: border-color 0.12s, color 0.12s; }
+.theme-toggle { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 10px; height: 28px; font-size: 12px; font-family: var(--font); color: var(--muted); cursor: pointer; transition: border-color 0.12s, color 0.12s; display: inline-flex; align-items: center; justify-content: center; }
 .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
 
 .container { max-width: 1240px; margin: 0 auto; padding: 28px 32px; }
@@ -158,6 +158,10 @@ header { padding-bottom: 18px; margin-bottom: 24px; border-bottom: 1px solid var
 .kbd-row span { color: var(--muted); font-size: 12px; }
 kbd { display: inline-block; padding: 1px 6px; border: 1px solid var(--border); border-radius: 4px; font-family: var(--mono); font-size: 11px; background: var(--bg); color: var(--fg); box-shadow: 0 1px 0 var(--border); white-space: nowrap; }
 .kbd-close { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); text-align: center; }
+.server-status { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; font-family: var(--mono); color: var(--muted); padding: 0 10px; height: 28px; border: 1px solid var(--border); border-radius: var(--radius-sm); transition: color 0.2s, border-color 0.2s; }
+.server-status .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--grey); flex-shrink: 0; transition: background 0.2s; }
+.server-status.live .dot { background: var(--green); }
+.server-status.live { color: var(--green); border-color: var(--green-bg); }
 [data-tab="reading-list"] { --accent: var(--reading-list); --accent-light: #ede4fc; }
 [data-theme="dark"][data-tab="reading-list"] { --accent-light: #2d2040; }
 .paper.rl-read { background: var(--seen-bg); border-top-color: var(--border); border-bottom-color: var(--border); box-shadow: none; }
@@ -197,8 +201,12 @@ kbd { display: inline-block; padding: 1px 6px; border: 1px solid var(--border); 
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
+      <div class="server-status" id="server-status" title="Server connectivity">
+        <span class="dot"></span>
+        <span id="server-status-text">…</span>
+      </div>
       <button class="theme-toggle" onclick="toggleKbd()" title="Keyboard shortcuts">?</button>
-      <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()">☀︎ Light</button>
+      <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()" title="Toggle theme" style="padding:0 8px;"></button>
     </div>
   </header>
 
@@ -331,6 +339,12 @@ let lastKey = null;
 let lastKeyTime = 0;
 
 // Theme
+const SVG_SUN = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="2.8"/><line x1="8" y1="1" x2="8" y2="3.2"/><line x1="8" y1="12.8" x2="8" y2="15"/><line x1="1" y1="8" x2="3.2" y2="8"/><line x1="12.8" y1="8" x2="15" y2="8"/><line x1="2.93" y1="2.93" x2="4.49" y2="4.49"/><line x1="11.51" y1="11.51" x2="13.07" y2="13.07"/><line x1="13.07" y1="2.93" x2="11.51" y2="4.49"/><line x1="4.49" y1="11.51" x2="2.93" y2="13.07"/></svg>`;
+const SVG_MOON = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 10A6 6 0 0 1 6 2.5a5.5 5.5 0 1 0 7.5 7.5z"/></svg>`;
+function updateThemeBtn(theme) {
+  const btn = document.getElementById('theme-toggle');
+  if (btn) btn.innerHTML = theme === 'dark' ? SVG_SUN : SVG_MOON;
+}
 (function() {
   const saved = localStorage.getItem('theme');
   const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
@@ -338,11 +352,6 @@ let lastKeyTime = 0;
   if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
   updateThemeBtn(theme);
 })();
-
-function updateThemeBtn(theme) {
-  const btn = document.getElementById('theme-toggle');
-  if (btn) btn.textContent = theme === 'dark' ? '☀︎ Light' : '☽ Dark';
-}
 
 function toggleTheme() {
   const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
@@ -366,18 +375,30 @@ function switchTab(tab) {
 
 async function checkServer() {
   try {
-    const r = await fetch('/regenerate', {method: 'POST'});
+    const r = await fetch('/summary');
     serverAvailable = r.ok;
   } catch { serverAvailable = false; }
+  const badge = document.getElementById('server-status');
+  const label = document.getElementById('server-status-text');
+  if (serverAvailable) {
+    badge.classList.add('live');
+    label.textContent = 'Live';
+    badge.title = 'Server connected';
+  } else {
+    badge.classList.remove('live');
+    label.textContent = 'Offline';
+    badge.title = 'Server offline — run sieve serve to enable write actions';
+  }
   if (!serverAvailable) {
     document.querySelectorAll('.server-only').forEach(el => {
       el.disabled = true;
-      el.title = 'Start sieve-serve to enable';
+      el.title = 'Start sieve serve to enable';
     });
   }
   render();
 }
 checkServer();
+setInterval(checkServer, 10000);
 
 function scoreClass(s) {
   if (s >= 8) return 'score-high';

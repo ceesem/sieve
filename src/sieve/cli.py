@@ -1,5 +1,4 @@
 import logging
-import sys
 import threading
 import time
 import webbrowser
@@ -22,16 +21,53 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _print_help():
+    from rich.console import Console
+    from rich.padding import Padding
+    from rich.table import Table
+    from rich.text import Text
+
+    console = Console()
+    console.print()
+    console.print(
+        Text("sieve", style="bold cyan")
+        + Text(" — literature monitoring for neuroscience/connectomics", style="dim")
+    )
+    console.print()
+
+    table = Table(box=None, pad_edge=False, show_header=False, padding=(0, 2, 0, 0))
+    table.add_column(style="bold green", no_wrap=True)
+    table.add_column(style="")
+    table.add_column(style="dim")
+
+    table.add_row(
+        "run",
+        "Fetch, score, ingest, and rebuild the static site",
+        "[--site-threshold N]",
+    )
+    table.add_row("serve", "Build site and start local server with write-back", "")
+    table.add_row(
+        "seed",
+        "Evaluate a paper and optionally update interests",
+        "--doi DOI [--pdf PATH]",
+    )
+    table.add_row(
+        "cite",
+        "Fetch and score a citation graph around a paper",
+        "--doi DOI [--forward] [--recommend]",
+    )
+    table.add_row("clean", "Prune low-score papers outside the fetch window", "")
+
+    console.print(Padding(table, (0, 0, 0, 2)))
+    console.print()
+    console.print(
+        Text("Usage: ", style="bold") + Text("sieve <command> [options]", style="")
+    )
+    console.print()
+
+
 def _score_ingest_build(papers, settings, progress, console):
     """Shared score → ingest → build-site pipeline with rich progress tasks."""
-    from rich.progress import (
-        BarColumn,
-        MofNCompleteColumn,
-        SpinnerColumn,
-        TextColumn,
-        TimeElapsedColumn,
-    )
-
     n_haiku = (len(papers) + settings.batch_size - 1) // settings.batch_size
     haiku_task = progress.add_task("Haiku triage…", total=n_haiku)
     sonnet_task = progress.add_task("Sonnet scoring…", total=None, visible=False)
@@ -75,8 +111,7 @@ def _score_ingest_build(papers, settings, progress, console):
     return total_inserted, total_high
 
 
-def run() -> None:
-    import argparse
+def run(args=None) -> None:
     import logging as _logging
 
     from rich.console import Console
@@ -89,16 +124,11 @@ def run() -> None:
         TimeElapsedColumn,
     )
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--site-threshold", type=int, default=None)
-    args, _ = parser.parse_known_args()
-
     settings = load_settings()
-    if args.site_threshold is not None:
+    if args is not None and args.site_threshold is not None:
         settings.site_threshold = args.site_threshold
     db.init_db()
 
-    logger.info("sieve-run started")
     _logging.getLogger("sieve").setLevel(_logging.WARNING)
     _logging.getLogger("httpx").setLevel(_logging.WARNING)
 
@@ -135,26 +165,30 @@ def run() -> None:
         )
 
     console.print(
-        f"\nStored [bold]{total_inserted}[/bold] papers · "
-        f"[bold cyan]{total_high}[/bold cyan] scored ≥ {settings.display_threshold}"
+        f"\nProcessed [bold]{total_inserted}[/bold] papers · "
+        f"[bold cyan]{total_high}[/bold cyan] above threshold (≥{settings.display_threshold})"
     )
 
 
-def serve() -> None:
+def serve(args=None) -> None:
     import uvicorn
 
     settings = load_settings()
     db.init_db()
+
+    from rich.console import Console
+
+    console = Console()
 
     summary = db.get_summary(
         settings.display_threshold,
         days=settings.lookback_days,
         site_threshold=settings.site_threshold,
     )
-    print(
-        f"{summary['unread']} unread papers "
-        f"({summary['high_score']} scored >={settings.display_threshold}). "
-        f"Opening browser..."
+    console.print(
+        f"[bold]{summary['unread']}[/bold] unread papers "
+        f"([cyan]{summary['high_score']}[/cyan] scored ≥{settings.display_threshold}) · "
+        f"opening browser…"
     )
 
     build_site(settings)
@@ -172,22 +206,27 @@ def serve() -> None:
     )
 
     def _quit_on_enter():
-        input("\nPress Enter to quit sieve-serve...\n")
+        input("\nPress Enter to quit…\n")
         server.should_exit = True
 
     threading.Thread(target=_quit_on_enter, daemon=True).start()
     server.run()
 
 
-def clean() -> None:
+def clean(args=None) -> None:
+    from rich.console import Console
+
+    console = Console()
+
     settings = load_settings()
     db.init_db()
     deleted = db.prune_papers(settings.site_threshold, settings.lookback_days)
-    logger.info(f"Pruned {deleted} low-score papers outside the fetch window.")
+    console.print(
+        f"Pruned [bold]{deleted}[/bold] low-score papers outside the fetch window."
+    )
 
 
-def cite_cli() -> None:
-    import argparse
+def cite(args) -> None:
     import logging as _logging
 
     from rich.console import Console
@@ -200,19 +239,11 @@ def cite_cli() -> None:
         TimeElapsedColumn,
     )
 
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--doi", required=True)
-    parser.add_argument("--forward", action="store_true", default=False)
-    parser.add_argument("--recommend", action="store_true", default=False)
-    parser.add_argument("--site-threshold", type=int, default=None)
-    args, _ = parser.parse_known_args()
-
     settings = load_settings()
     if args.site_threshold is not None:
         settings.site_threshold = args.site_threshold
     db.init_db()
 
-    # Suppress info-level logs so they don't interleave with rich output
     _logging.getLogger("sieve").setLevel(_logging.WARNING)
     _logging.getLogger("httpx").setLevel(_logging.WARNING)
 
@@ -227,7 +258,6 @@ def cite_cli() -> None:
     )
 
     with progress:
-        # --- Fetch ---
         fetch_task = progress.add_task("Fetching citation graph…", total=None)
         papers = fetch_citation_graph(
             args.doi,
@@ -255,25 +285,74 @@ def cite_cli() -> None:
         )
 
     console.print(
-        f"\nStored [bold]{total_inserted}[/bold] papers · "
-        f"[bold cyan]{total_high}[/bold cyan] scored ≥ {settings.display_threshold}"
+        f"\nProcessed [bold]{total_inserted}[/bold] papers · "
+        f"[bold cyan]{total_high}[/bold cyan] above threshold (≥{settings.display_threshold})"
     )
 
 
-def seed_cli() -> None:
-    doi = None
-    pdf = None
-    args = sys.argv[1:]
-    i = 0
-    while i < len(args):
-        if args[i] == "--doi" and i + 1 < len(args):
-            doi = args[i + 1]
-            i += 2
-        elif args[i] == "--pdf" and i + 1 < len(args):
-            pdf = args[i + 1]
-            i += 2
-        else:
-            i += 1
-
+def seed(args) -> None:
     db.init_db()
-    seed_paper(doi=doi, pdf=pdf)
+    seed_paper(doi=args.doi, pdf=getattr(args, "pdf", None))
+
+
+def main() -> None:
+    import argparse
+
+    parser = argparse.ArgumentParser(prog="sieve", add_help=False)
+    parser.add_argument("-h", "--help", action="store_true")
+    subparsers = parser.add_subparsers(dest="command")
+
+    # run
+    p_run = subparsers.add_parser("run", help="Fetch, score, ingest, rebuild site")
+    p_run.add_argument(
+        "--site-threshold",
+        type=int,
+        default=None,
+        metavar="N",
+        help="Override site display threshold",
+    )
+
+    # serve
+    subparsers.add_parser("serve", help="Start local server and open browser")
+
+    # seed
+    p_seed = subparsers.add_parser(
+        "seed", help="Evaluate a paper, optionally update interests"
+    )
+    p_seed.add_argument("--doi", default=None, metavar="DOI")
+    p_seed.add_argument("--pdf", default=None, metavar="PATH")
+
+    # cite
+    p_cite = subparsers.add_parser("cite", help="Fetch and score a citation graph")
+    p_cite.add_argument("--doi", required=True, metavar="DOI")
+    p_cite.add_argument(
+        "--forward",
+        action="store_true",
+        default=False,
+        help="Include forward citations",
+    )
+    p_cite.add_argument(
+        "--recommend",
+        action="store_true",
+        default=False,
+        help="Include Semantic Scholar recommendations",
+    )
+    p_cite.add_argument("--site-threshold", type=int, default=None, metavar="N")
+
+    # clean
+    subparsers.add_parser("clean", help="Prune low-score papers outside fetch window")
+
+    args = parser.parse_args()
+
+    if args.command is None or args.help:
+        _print_help()
+        return
+
+    dispatch = {
+        "run": run,
+        "serve": serve,
+        "seed": seed,
+        "cite": cite,
+        "clean": clean,
+    }
+    dispatch[args.command](args)
