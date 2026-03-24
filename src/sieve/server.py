@@ -167,6 +167,24 @@ def send_to_zotero(body: DoiBody):
         raise HTTPException(status_code=502, detail=str(e))
 
 
+@app.get("/summary")
+def get_summary_endpoint():
+    try:
+        settings = load_settings()
+        summary = db.get_summary(
+            display_threshold=settings.display_threshold,
+            days=settings.lookback_days,
+            site_threshold=settings.site_threshold,
+        )
+        return {
+            "status": "ok",
+            **summary,
+            "display_threshold": settings.display_threshold,
+        }
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+
 @app.post("/regenerate")
 def regenerate():
     try:

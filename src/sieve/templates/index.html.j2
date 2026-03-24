@@ -43,8 +43,8 @@
   --bg: #1e2030;
   --fg: #eef0ff;
   --muted: #cad3f5;
-  --border: #363a4f;
-  --card-bg: #24273a;
+  --border: #434768;
+  --card-bg: #2b2e40;
   --sidebar-bg: #181926;
   --green: #a6da95;
   --green-bg: #243329;
@@ -100,15 +100,16 @@ header { padding-bottom: 18px; margin-bottom: 24px; border-bottom: 1px solid var
 .content { flex: 1; min-width: 0; padding-left: 28px; }
 .paper-count { font-size: 11px; color: var(--muted); margin-bottom: 14px; font-family: var(--mono); }
 
-.paper { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 10px; box-shadow: var(--shadow); transition: box-shadow 0.15s; }
+.paper { background: var(--card-bg); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); border-left: 3px solid transparent; border-right: 3px solid transparent; border-radius: var(--radius); padding: 16px 18px; margin-bottom: 10px; box-shadow: var(--shadow); transition: box-shadow 0.15s; }
 .paper:hover { box-shadow: var(--shadow-md); }
-.paper.seen { background: var(--seen-bg); border-color: var(--border); box-shadow: none; }
+.paper.seen { background: var(--seen-bg); border-top-color: var(--border); border-bottom-color: var(--border); box-shadow: none; }
 .paper.seen .paper-title a { color: var(--muted); }
-.paper.on-reading-list { border-left: 3px solid var(--reading-list); }
-.paper.unread { border-right: 3px solid var(--unread); }
+.paper.on-reading-list { border-left-color: var(--reading-list); }
+.paper.unread { border-right-color: var(--unread); }
+.paper.unread .score-badge { border-color: currentColor; }
 
 .paper-header { display: flex; gap: 14px; align-items: flex-start; }
-.score-badge { font-size: 17px; font-weight: 800; font-family: var(--mono); min-width: 40px; text-align: center; padding: 5px 6px; border-radius: var(--radius-sm); line-height: 1.2; flex-shrink: 0; }
+.score-badge { font-size: 17px; font-weight: 800; font-family: var(--mono); min-width: 40px; text-align: center; padding: 5px 6px; border: 1px solid transparent; border-radius: var(--radius-sm); line-height: 1.2; flex-shrink: 0; }
 .score-high { color: var(--green); background: var(--green-bg); }
 .score-mid { color: var(--amber); background: var(--amber-bg); }
 .score-low { color: var(--grey); background: var(--grey-bg); }
@@ -134,6 +135,8 @@ header { padding-bottom: 18px; margin-bottom: 24px; border-bottom: 1px solid var
 .actions button:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-light); }
 .actions button.active { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
 .actions button:disabled { opacity: 0.35; cursor: default; }
+.actions button.read-toggle { min-width: 96px; text-align: center; }
+.actions button.action-btn { border-style: dashed; }
 
 .note-area { margin-top: 10px; width: 100%; }
 .note-area textarea { width: 100%; padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; font-family: var(--font); resize: vertical; min-height: 56px; transition: border-color 0.12s; color: var(--fg); }
@@ -143,7 +146,7 @@ header { padding-bottom: 18px; margin-bottom: 24px; border-bottom: 1px solid var
 
 .empty { text-align: center; padding: 60px; color: var(--muted); font-size: 13px; }
 
-.paper.selected { outline: 2px solid var(--accent); outline-offset: -1px; border-color: var(--accent); }
+.paper.selected { outline: 2px solid var(--accent); outline-offset: -1px; }
 
 .kbd-modal { display: none; position: fixed; inset: 0; z-index: 100; background: rgba(0,0,0,0.35); align-items: center; justify-content: center; }
 .kbd-modal.open { display: flex; }
@@ -157,7 +160,7 @@ kbd { display: inline-block; padding: 1px 6px; border: 1px solid var(--border); 
 .kbd-close { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); text-align: center; }
 [data-tab="reading-list"] { --accent: var(--reading-list); --accent-light: #ede4fc; }
 [data-theme="dark"][data-tab="reading-list"] { --accent-light: #2d2040; }
-.paper.rl-read { background: var(--seen-bg); border-color: var(--border); box-shadow: none; }
+.paper.rl-read { background: var(--seen-bg); border-top-color: var(--border); border-bottom-color: var(--border); box-shadow: none; }
 .paper.rl-read .paper-title a { color: var(--muted); }
 </style>
 </head>
@@ -176,7 +179,7 @@ kbd { display: inline-block; padding: 1px 6px; border: 1px solid var(--border); 
     </div>
     <div class="kbd-section">
       <h3>Actions</h3>
-      <div class="kbd-row"><span>Toggle seen / read</span> <kbd>m</kbd></div>
+      <div class="kbd-row"><span>Mark read / unread</span> <kbd>m</kbd></div>
       <div class="kbd-row"><span>Toggle reading list</span> <kbd>l</kbd></div>
       <div class="kbd-row"><span>Send to Zotero</span> <kbd>i</kbd></div>
     </div>
@@ -190,7 +193,7 @@ kbd { display: inline-block; padding: 1px 6px; border: 1px solid var(--border); 
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="42" height="42" style="flex-shrink:0;border-radius:7px"><defs><linearGradient id="hbg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#1e66f5"/><stop offset="100%" stop-color="#8839ef"/></linearGradient><linearGradient id="hfg" x1="100%" y1="100%" x2="0%" y2="0%"><stop offset="0%" stop-color="#1e66f5"/><stop offset="100%" stop-color="#8839ef"/></linearGradient></defs><rect width="32" height="32" rx="7" fill="url(#hbg)"/><path d="M7 9h18l-7 9v6l-4-2v-4z" fill="url(#hfg)" stroke="white" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>
       <div>
         <h1>Literature Sieve</h1>
-        <div class="summary">{{ summary.unread }} unread on feed · {{ summary.rl_unread }} unread on list · {{ summary.high_score }} scored &ge;{{ display_threshold }} · last fetched {{ summary.last_fetched or 'never' }} · generated {{ generated_at }}</div>
+        <div class="summary" id="summary-line">{{ summary.unread }} unread on feed · {{ summary.rl_unread }} unread on list · {{ summary.high_score }} scored &ge;{{ display_threshold }} · last fetched {{ summary.last_fetched or 'never' }} · generated {{ generated_at }}</div>
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
@@ -466,8 +469,8 @@ function render() {
     const url = p.url || (p.doi && !p.doi.startsWith('arxiv:') ? `https://doi.org/${p.doi}` : p.url);
     const dis = srv ? '' : ' disabled title="Start sieve-serve to enable"';
     const readBtn = isRL
-      ? `<button onclick="toggleRlRead('${p.doi}', this)"${dis}>${p.rl_read ? 'Unread' : 'Read'}</button>`
-      : `<button onclick="toggleSeen('${p.doi}', this)"${dis}>${p.seen ? 'Mark unread' : 'Mark seen'}</button>`;
+      ? `<button class="read-toggle" onclick="toggleRlRead('${p.doi}', this)"${dis}>${p.rl_read ? 'Mark unread' : 'Mark read'}</button>`
+      : `<button class="read-toggle" onclick="toggleSeen('${p.doi}', this)"${dis}>${p.seen ? 'Mark unread' : 'Mark read'}</button>`;
     return `
     <div class="paper${seenCls}${rlReadCls}${rlCls}${unreadCls}" data-idx="${i}" data-doi="${p.doi}">
       <div class="paper-header">
@@ -481,9 +484,9 @@ function render() {
           ${p.abstract ? `<button class="toggle-abstract" onclick="toggleAbstract(this)">abstract</button><div class="paper-abstract">${p.abstract}</div>` : ''}
           <div class="actions">
             ${readBtn}
-            <button class="${p.reading_list ? 'active' : ''}" onclick="toggleRL('${p.doi}', this)"${dis}>${p.reading_list ? 'On list' : 'Reading list'}</button>
+            <button class="${p.reading_list ? 'active' : ''}" onclick="toggleRL('${p.doi}', this)"${dis}>Reading list</button>
             <button onclick="showNote('${p.doi}', this)"${dis}>Note</button>
-            <button class="server-only" onclick="sendToZotero('${p.doi}', this)"${dis}>Zotero</button>
+            <button class="action-btn server-only" onclick="sendToZotero('${p.doi}', this)"${dis}>Zotero ↗</button>
           </div>
           ${p.notes ? `<div class="note-area"><textarea onblur="saveNote('${p.doi}', this)">${p.notes}</textarea></div>` : ''}
         </div>
@@ -519,6 +522,18 @@ function toggleAbstract(btn) {
   btn.textContent = abs.classList.contains('open') ? 'hide abstract' : 'abstract';
 }
 
+async function refreshSummary() {
+  try {
+    const r = await fetch('/summary');
+    const d = await r.json();
+    if (d.status !== 'ok') return;
+    const el = document.getElementById('summary-line');
+    if (!el) return;
+    const generated = el.textContent.match(/generated (.+)$/)?.[1] || '';
+    el.textContent = `${d.unread} unread on feed \u00b7 ${d.rl_unread} unread on list \u00b7 ${d.high_score} scored \u2265${d.display_threshold} \u00b7 last fetched ${d.last_fetched || 'never'} \u00b7 generated ${generated}`;
+  } catch {}
+}
+
 async function markSeen(doi, btn) {
   try {
     await fetch('/mark-seen', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({doi})});
@@ -527,6 +542,7 @@ async function markSeen(doi, btn) {
     btn.textContent = 'Seen';
     btn.closest('.paper').classList.add('seen');
     btn.closest('.paper').classList.remove('unread');
+    refreshSummary();
   } catch {}
 }
 
@@ -536,9 +552,10 @@ async function toggleSeen(doi, btn) {
     const data = await r.json();
     const p = PAPERS.find(x => x.doi === doi);
     if (p) p.seen = data.seen;
-    btn.textContent = data.seen ? 'Mark unread' : 'Mark seen';
+    btn.textContent = data.seen ? 'Mark unread' : 'Mark read';
     btn.closest('.paper').classList.toggle('seen', !!data.seen);
     btn.closest('.paper').classList.toggle('unread', !data.seen);
+    refreshSummary();
   } catch {}
 }
 
@@ -548,9 +565,10 @@ async function toggleRlRead(doi, btn) {
     const data = await r.json();
     const p = PAPERS.find(x => x.doi === doi);
     if (p) p.rl_read = data.rl_read;
-    btn.textContent = data.rl_read ? 'Unread' : 'Read';
+    btn.textContent = data.rl_read ? 'Mark unread' : 'Mark read';
     btn.closest('.paper').classList.toggle('rl-read', !!data.rl_read);
     btn.closest('.paper').classList.toggle('unread', !data.rl_read);
+    refreshSummary();
   } catch {}
 }
 
@@ -559,6 +577,7 @@ async function markAllRlRead() {
     await fetch('/mark-all-rl-read', {method: 'POST'});
     PAPERS.forEach(p => { if (p.reading_list) p.rl_read = 1; });
     render();
+    refreshSummary();
   } catch {}
 }
 
@@ -568,9 +587,9 @@ async function toggleRL(doi, btn) {
     const p = PAPERS.find(x => x.doi === doi);
     if (p) p.reading_list = p.reading_list ? 0 : 1;
     btn.classList.toggle('active');
-    btn.textContent = p.reading_list ? 'On list' : 'Reading list';
     btn.closest('.paper').classList.toggle('on-reading-list');
     if (activeTab === 'reading-list' && !p.reading_list) render();
+    refreshSummary();
   } catch {}
 }
 
@@ -590,6 +609,7 @@ async function markAllSeen() {
     await fetch('/mark-all-seen', {method: 'POST'});
     PAPERS.forEach(p => { p.seen = 1; });
     render();
+    refreshSummary();
   } catch {}
 }
 

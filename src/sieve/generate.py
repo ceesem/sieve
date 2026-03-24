@@ -21,7 +21,11 @@ def build_site(settings: Settings) -> None:
     papers = db.get_papers_for_display(
         days=settings.lookback_days, site_threshold=settings.site_threshold
     )
-    summary = db.get_summary(display_threshold=settings.display_threshold)
+    summary = db.get_summary(
+        display_threshold=settings.display_threshold,
+        days=settings.lookback_days,
+        site_threshold=settings.site_threshold,
+    )
 
     env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), autoescape=True)
     template = env.get_template("index.html.j2")

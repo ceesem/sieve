@@ -146,7 +146,11 @@ def serve() -> None:
     settings = load_settings()
     db.init_db()
 
-    summary = db.get_summary(settings.display_threshold)
+    summary = db.get_summary(
+        settings.display_threshold,
+        days=settings.lookback_days,
+        site_threshold=settings.site_threshold,
+    )
     print(
         f"{summary['unread']} unread papers "
         f"({summary['high_score']} scored >={settings.display_threshold}). "

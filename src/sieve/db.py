@@ -214,17 +214,24 @@ def get_papers_for_display(days: int = 30, site_threshold: int = 4) -> list[dict
     return result
 
 
-def get_summary(display_threshold: int = 7) -> dict:
+def get_summary(
+    display_threshold: int = 7, days: int = 30, site_threshold: int = 4
+) -> dict:
     with _connect() as conn:
         total = conn.execute("SELECT COUNT(*) FROM papers").fetchone()[0]
-        unread = conn.execute("SELECT COUNT(*) FROM papers WHERE seen = 0").fetchone()[
-            0
-        ]
+        unread = conn.execute(
+            """SELECT COUNT(*) FROM papers
+               WHERE seen = 0
+                 AND (fetched_at >= date('now', ?) OR reading_list = 1)
+                 AND (score >= ? OR reading_list = 1)""",
+            (f"-{days} days", site_threshold),
+        ).fetchone()[0]
         rl_unread = conn.execute(
             "SELECT COUNT(*) FROM papers WHERE reading_list = 1 AND rl_read = 0"
         ).fetchone()[0]
         high_score = conn.execute(
-            "SELECT COUNT(*) FROM papers WHERE score >= ?", (display_threshold,)
+            "SELECT COUNT(*) FROM papers WHERE score >= ? AND seen = 0",
+            (display_threshold,),
         ).fetchone()[0]
         row = conn.execute("SELECT MAX(fetched_at) FROM papers").fetchone()
         last_fetched = row[0] if row else None
