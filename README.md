@@ -90,13 +90,6 @@ Edit **`config/interests.md`** — describe what you want to read. This is the p
 - Optogenetic dissection of specific cell types or pathways during visual tasks
 - Computational models of visual cortical circuits
 
-### Labs I follow
-
-- Mark Hübener, Tobias Bonhoeffer
-- Karel Svoboda
-- Yang Dan
-- Massimo Scanziani
-
 ### Explicitly NOT interested in
 
 - Human or primate visual neuroscience unless methods are directly transferable to mice
