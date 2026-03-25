@@ -366,6 +366,8 @@ def fetch_citation_graph(
         logger.info(f"OpenAlex: {len(oa_papers)} papers fetched")
 
     # Recommendations via S2 (no OA equivalent)
+    if recommend and not paper_id:
+        logger.info("Skipping recommendations — paper not found in Semantic Scholar")
     if recommend and paper_id:
         recs = _fetch_s2_recommendations(client, paper_id)
         for item in recs:
