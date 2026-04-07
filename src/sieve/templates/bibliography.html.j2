@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ title }}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+/* Catppuccin Latte (light) */
+:root {
+  --bg: #e6e9ef;
+  --fg: #1e1e2e;
+  --muted: #4c4f69;
+  --border: #ccd0da;
+  --card-bg: #eff1f5;
+  --green: #40a02b;
+  --green-bg: #d9f0d3;
+  --amber: #df8e1d;
+  --amber-bg: #f5e4c0;
+  --grey: #8c8fa1;
+  --grey-bg: #bcc0cc;
+  --accent: #1e66f5;
+  --accent-light: #e4ebfe;
+  --font: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: "SF Mono", "Fira Code", Menlo, monospace;
+  --radius: 8px;
+  --radius-sm: 5px;
+  --shadow: 0 1px 3px rgba(0,0,0,0.07), 0 1px 2px rgba(0,0,0,0.04);
+  --shadow-md: 0 4px 8px rgba(0,0,0,0.07), 0 2px 4px rgba(0,0,0,0.04);
+}
+
+/* Catppuccin Macchiato (dark) */
+[data-theme="dark"] {
+  --bg: #1e2030;
+  --fg: #eef0ff;
+  --muted: #cad3f5;
+  --border: #434768;
+  --card-bg: #2b2e40;
+  --green: #a6da95;
+  --green-bg: #243329;
+  --amber: #eed49f;
+  --amber-bg: #332e1e;
+  --grey: #6e738d;
+  --grey-bg: #363a4f;
+  --accent: #8aadf4;
+  --accent-light: #2a2f4a;
+  --shadow: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+  --shadow-md: 0 4px 8px rgba(0,0,0,0.3), 0 2px 4px rgba(0,0,0,0.2);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: var(--font); background: var(--bg); color: var(--fg); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; transition: background 0.2s, color 0.2s; }
+
+.container { max-width: 860px; margin: 0 auto; padding: 32px 24px; }
+
+.topbar { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding-bottom: 20px; margin-bottom: 24px; border-bottom: 1px solid var(--border); }
+.topbar-left { min-width: 0; }
+.topbar-left h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.6px; line-height: 1.2; }
+.topbar-meta { font-size: 11.5px; color: var(--muted); margin-top: 3px; font-family: var(--mono); }
+.topbar-right { display: flex; gap: 8px; align-items: center; flex-shrink: 0; }
+
+.search-row { display: flex; align-items: center; gap: 10px; margin-bottom: 16px; }
+.search-row input { flex: 1; padding: 7px 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 13px; font-family: var(--font); background: var(--card-bg); color: var(--fg); transition: border-color 0.12s; }
+.search-row input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-light); }
+.paper-count { font-size: 11px; color: var(--muted); font-family: var(--mono); white-space: nowrap; }
+
+.theme-btn { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 8px; height: 28px; font-size: 12px; font-family: var(--font); color: var(--muted); cursor: pointer; transition: border-color 0.12s, color 0.12s; display: inline-flex; align-items: center; justify-content: center; }
+.theme-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.paper { background: var(--card-bg); border: 1px solid var(--border); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 12px; box-shadow: var(--shadow); transition: box-shadow 0.15s; }
+.paper:hover { box-shadow: var(--shadow-md); }
+
+.paper-header { display: flex; gap: 14px; align-items: flex-start; }
+.score-badge { font-size: 17px; font-weight: 800; font-family: var(--mono); min-width: 40px; text-align: center; padding: 5px 6px; border-radius: var(--radius-sm); line-height: 1.2; flex-shrink: 0; }
+.score-high { color: var(--green); background: var(--green-bg); }
+.score-mid { color: var(--amber); background: var(--amber-bg); }
+.score-low { color: var(--grey); background: var(--grey-bg); }
+
+.paper-body { flex: 1; min-width: 0; }
+.paper-title { font-weight: 700; font-size: 15px; line-height: 1.35; }
+.paper-title a { color: var(--fg); text-decoration: none; transition: color 0.12s; }
+.paper-title a:hover { color: var(--accent); }
+.paper-meta { font-size: 12px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+.source-badge { display: inline-block; background: var(--grey-bg); border: 1px solid var(--border); padding: 0px 7px; border-radius: 20px; font-size: 11px; font-weight: 600; color: var(--muted); }
+.doi-link { font-family: var(--mono); font-size: 11px; color: var(--muted); text-decoration: none; transition: color 0.12s; }
+.doi-link:hover { color: var(--accent); text-decoration: underline; }
+
+.paper-reason { margin-top: 9px; font-size: 13px; color: var(--fg); font-style: italic; line-height: 1.55; padding-left: 10px; border-left: 2px solid var(--border); }
+.paper-abstract { margin-top: 10px; font-size: 13px; color: var(--muted); line-height: 1.6; }
+.toggle-abstract { font-size: 11.5px; color: var(--accent); cursor: pointer; background: none; border: none; padding: 0; margin-top: 6px; font-weight: 500; font-family: var(--font); transition: opacity 0.12s; }
+.toggle-abstract:hover { opacity: 0.7; }
+.abstract-body { display: none; }
+.abstract-body.open { display: block; }
+
+.empty { text-align: center; padding: 60px; color: var(--muted); font-size: 13px; }
+
+footer { margin-top: 40px; padding-top: 16px; border-top: 1px solid var(--border); font-size: 11px; color: var(--muted); font-family: var(--mono); }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="topbar">
+    <div class="topbar-left">
+      <h1>{{ title }}</h1>
+      <div class="topbar-meta" id="meta-line"></div>
+    </div>
+    <div class="topbar-right">
+      <button class="theme-btn" id="theme-btn" onclick="toggleTheme()" title="Toggle theme"></button>
+    </div>
+  </div>
+
+  <div class="search-row">
+    <input type="text" id="search" placeholder="Search title, authors, abstract…" oninput="render()">
+    <span class="paper-count" id="paper-count"></span>
+  </div>
+
+  <div id="paper-list"></div>
+
+  <footer>Generated {{ generated_at }} · sieve v{{ sieve_version }}</footer>
+</div>
+
+<script>
+const PAPERS = {{ papers_json | safe }};
+
+const SVG_SUN = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="8" cy="8" r="2.8"/><line x1="8" y1="1" x2="8" y2="3.2"/><line x1="8" y1="12.8" x2="8" y2="15"/><line x1="1" y1="8" x2="3.2" y2="8"/><line x1="12.8" y1="8" x2="15" y2="8"/><line x1="2.93" y1="2.93" x2="4.49" y2="4.49"/><line x1="11.51" y1="11.51" x2="13.07" y2="13.07"/><line x1="13.07" y1="2.93" x2="11.51" y2="4.49"/><line x1="4.49" y1="11.51" x2="2.93" y2="13.07"/></svg>`;
+const SVG_MOON = `<svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M13.5 10A6 6 0 0 1 6 2.5a5.5 5.5 0 1 0 7.5 7.5z"/></svg>`;
+
+function updateThemeBtn(theme) {
+  const btn = document.getElementById('theme-btn');
+  if (btn) btn.innerHTML = theme === 'dark' ? SVG_SUN : SVG_MOON;
+}
+(function() {
+  const saved = localStorage.getItem('theme');
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const theme = saved || (prefersDark ? 'dark' : 'light');
+  if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+  updateThemeBtn(theme);
+})();
+
+function toggleTheme() {
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const next = isDark ? 'light' : 'dark';
+  if (next === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+  else document.documentElement.removeAttribute('data-theme');
+  localStorage.setItem('theme', next);
+  updateThemeBtn(next);
+}
+
+function scoreClass(s) {
+  if (s >= 8) return 'score-high';
+  if (s >= 6) return 'score-mid';
+  return 'score-low';
+}
+
+function fmtAuthors(authors) {
+  if (!authors || !authors.length) return '';
+  if (authors.length <= 3) return authors.join(', ');
+  const senior = authors[authors.length - 1];
+  const last = senior.includes(',') ? senior.split(',')[0].trim() : senior.split(' ').pop();
+  return authors.slice(0, 3).join(', ') + ` et al. (${last} lab)`;
+}
+
+function render() {
+  const search = document.getElementById('search').value.toLowerCase();
+  const filtered = PAPERS.filter(p => {
+    if (!search) return true;
+    const haystack = [p.title, fmtAuthors(p.authors), p.abstract, p.reason].filter(Boolean).join(' ').toLowerCase();
+    return haystack.includes(search);
+  });
+
+  document.getElementById('paper-count').textContent = `${filtered.length} of ${PAPERS.length} paper${PAPERS.length !== 1 ? 's' : ''}`;
+
+  const list = document.getElementById('paper-list');
+  if (!filtered.length) {
+    list.innerHTML = '<div class="empty">No papers match.</div>';
+    return;
+  }
+
+  list.innerHTML = filtered.map(p => {
+    const sc = scoreClass(p.score);
+    const url = p.url || (p.doi && !p.doi.startsWith('arxiv:') ? `https://doi.org/${p.doi}` : p.url);
+    const doiUrl = p.doi && !p.doi.startsWith('arxiv:') ? `https://doi.org/${p.doi}` : (p.url || '#');
+    return `
+    <div class="paper">
+      <div class="paper-header">
+        <div class="score-badge ${sc}">${p.score || '?'}</div>
+        <div class="paper-body">
+          <div class="paper-title"><a href="${url}" target="_blank" rel="noopener">${p.title}</a></div>
+          <div class="paper-meta">
+            ${fmtAuthors(p.authors)}${p.published_date ? ' · ' + p.published_date : ''} · <span class="source-badge">${p.journal || p.source}</span> · <a class="doi-link" href="${doiUrl}" target="_blank" rel="noopener">${p.doi}</a>
+          </div>
+          ${p.reason ? `<div class="paper-reason">${p.reason}</div>` : ''}
+          ${p.abstract ? `
+          <button class="toggle-abstract" onclick="toggleAbstract(this)">hide abstract</button>
+          <div class="abstract-body open paper-abstract">${p.abstract}</div>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function toggleAbstract(btn) {
+  const body = btn.nextElementSibling;
+  body.classList.toggle('open');
+  btn.textContent = body.classList.contains('open') ? 'hide abstract' : 'show abstract';
+}
+
+document.getElementById('meta-line').textContent = `${PAPERS.length} paper${PAPERS.length !== 1 ? 's' : ''}`;
+render();
+</script>
+</body>
+</html>

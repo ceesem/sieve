@@ -133,7 +133,9 @@ def _ask(prompt: str) -> str:
     return input().strip().lower()
 
 
-def seed(doi: str | None = None, pdf: str | None = None) -> None:
+def seed(
+    doi: str | None = None, pdf: str | None = None, downgrade: bool = False
+) -> None:
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     STAGING_DIR.mkdir(parents=True, exist_ok=True)
@@ -162,7 +164,37 @@ def seed(doi: str | None = None, pdf: str | None = None) -> None:
     else:
         paper_content = json.dumps(paper, indent=2)
 
-    eval_prompt = f"""\
+    if downgrade:
+        eval_prompt = f"""\
+Here is the paper:
+{paper_content}
+
+Here is the researcher's interests profile:
+{interests_text}
+
+The researcher has flagged this paper as scoring too HIGH — they want papers like this \
+to rank lower in future.
+
+1. Score the paper 1-10 against the current interests profile.
+   - 8-10: directly in core topics or methods
+   - 5-7: solid but unremarkable match
+   - 1-4: weak or excluded
+
+2. Suggest specific text to add to the interests profile that would cause papers like \
+this to score lower. This might be an explicit exclusion ("not if purely about X"), a \
+qualifier on an existing interest ("only when applied to Y, not Z"), or a new \
+low-priority note. Be precise and minimal — do not rewrite existing content. If the \
+paper is already a weak match or no addition would help, set suggested_addition to null.
+
+Output only valid JSON. No preamble, no markdown fences.
+{{
+  "score": integer 1-10,
+  "reasoning": "one sentence explaining why this paper currently scores high",
+  "update_needed": true or false,
+  "suggested_addition": "if update_needed: exact text to add and which section it belongs in. Otherwise null."
+}}"""
+    else:
+        eval_prompt = f"""\
 Here is the paper:
 {paper_content}
 
@@ -222,11 +254,16 @@ Output only valid JSON. No preamble, no markdown fences.
     applied = False
 
     score = evaluation.get("score")
-    match_basis = evaluation.get("match_basis")
     if score is not None:
         score_color = "green" if score >= 7 else "yellow" if score >= 5 else "red"
-        basis_str = f"  [dim]{match_basis}[/dim]" if match_basis else ""
-        console.print(f"\nScore: [{score_color}]{score}/10[/{score_color}]{basis_str}")
+        if downgrade:
+            console.print(f"\nCurrent score: [{score_color}]{score}/10[/{score_color}]")
+        else:
+            match_basis = evaluation.get("match_basis")
+            basis_str = f"  [dim]{match_basis}[/dim]" if match_basis else ""
+            console.print(
+                f"\nScore: [{score_color}]{score}/10[/{score_color}]{basis_str}"
+            )
 
     console.print()
     console.print(

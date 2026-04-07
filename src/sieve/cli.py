@@ -3,11 +3,12 @@ import threading
 import time
 import webbrowser
 from datetime import datetime
+from pathlib import Path
 
 from . import db
 from .cite import fetch_citation_graph
 from .fetch import fetch_all
-from .generate import build_site
+from .generate import build_bibliography, build_site
 from .ingest import ingest_batch
 from .score import score_papers
 from .seed import seed as seed_paper
@@ -57,6 +58,11 @@ def _print_help():
         "--doi DOI [--forward] [--recommend]",
     )
     table.add_row("clean", "Prune low-score papers outside the fetch window", "")
+    table.add_row(
+        "export",
+        "Generate a standalone annotated bibliography",
+        "--from FILE [--output PATH] [--title TEXT] [--interests PATH]",
+    )
 
     console.print(Padding(table, (0, 0, 0, 2)))
     console.print()
@@ -144,7 +150,15 @@ def run(args=None) -> None:
 
     with progress:
         fetch_task = progress.add_task("Fetching papers…", total=None)
-        papers = fetch_all(settings)
+        try:
+            papers = fetch_all(settings)
+        except (KeyboardInterrupt, Exception) as exc:
+            progress.stop()
+            if isinstance(exc, KeyboardInterrupt):
+                console.print("[yellow]Interrupted.[/yellow]")
+            else:
+                console.print(f"[red]Fetch failed:[/red] {exc}")
+            return
         progress.update(
             fetch_task,
             total=1,
@@ -295,6 +309,115 @@ def seed(args) -> None:
     seed_paper(doi=args.doi, pdf=getattr(args, "pdf", None))
 
 
+def _parse_doi_file(path: str, ignore_errors: bool) -> list[str]:
+    """Parse a DOI list from a plain-text or BibTeX file.
+
+    Plain text: one DOI per line; blank lines and # comments ignored.
+    BibTeX (.bib): extracts doi fields; enforces that all entries have one.
+    Strips https://doi.org/ prefixes. Raises SystemExit on user abort.
+    """
+    import re
+
+    from rich.console import Console
+
+    console = Console()
+    text = open(path).read()
+
+    if path.endswith(".bib"):
+        # Find all named entries (exclude @string/@preamble/@comment)
+        entry_pattern = re.compile(
+            r"@(?!string|preamble|comment)(\w+)\s*\{\s*([^,]+),",
+            re.IGNORECASE,
+        )
+        doi_pattern = re.compile(
+            r"\bdoi\s*=\s*[{\"](.*?)[}\"]", re.IGNORECASE | re.DOTALL
+        )
+
+        entries = list(entry_pattern.finditer(text))
+        dois: list[str] = []
+        missing: list[tuple[str, str]] = []
+
+        for m in entries:
+            entry_type = m.group(1)
+            entry_key = m.group(2).strip()
+            # Slice the entry body: from match start to next @ or end of file
+            start = m.start()
+            next_at = text.find("\n@", start + 1)
+            body = text[start:next_at] if next_at != -1 else text[start:]
+            doi_match = doi_pattern.search(body)
+            if doi_match:
+                raw = doi_match.group(1).strip()
+                raw = re.sub(r"^https?://doi\.org/", "", raw, flags=re.IGNORECASE)
+                dois.append(raw)
+            else:
+                missing.append((entry_key, f"@{entry_type}"))
+
+        if missing and not ignore_errors:
+            console.print(
+                f"\n[yellow]{len(missing)} entr{'y' if len(missing) == 1 else 'ies'} "
+                f"{'is' if len(missing) == 1 else 'are'} missing a DOI:[/yellow]"
+            )
+            for key, etype in missing:
+                console.print(f"  [dim]{key}[/dim] ({etype})")
+            console.print()
+            answer = input("Continue anyway? [y/N] ").strip().lower()
+            if answer != "y":
+                raise SystemExit(1)
+
+        return dois
+
+    # Plain text
+    dois = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        import re as _re
+
+        line = _re.sub(r"^https?://doi\.org/", "", line, flags=_re.IGNORECASE)
+        dois.append(line)
+    return dois
+
+
+def export(args) -> None:
+    from rich.console import Console
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+
+    console = Console()
+
+    dois = _parse_doi_file(args.from_file, args.ignore_errors)
+    if not dois:
+        console.print("[yellow]No DOIs found — nothing to export.[/yellow]")
+        return
+
+    output_path = Path(args.output)
+    interests_path = Path(args.interests) if args.interests else None
+
+    if interests_path:
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+            transient=True,
+        ) as progress:
+            progress.add_task("Annotating with custom interests…", total=None)
+            found, missing = build_bibliography(
+                dois, output_path, args.title, interests_path
+            )
+    else:
+        found, missing = build_bibliography(dois, output_path, args.title)
+
+    console.print(
+        f"Generated [bold]{found}[/bold] paper{'s' if found != 1 else ''} → [cyan]{output_path}[/cyan]"
+    )
+    if missing:
+        console.print(
+            f"[yellow]{len(missing)} DOI{'s' if len(missing) != 1 else ''} not found in DB:[/yellow]"
+        )
+        for doi in missing:
+            console.print(f"  [dim]{doi}[/dim]")
+
+
 def main() -> None:
     import argparse
 
@@ -342,6 +465,42 @@ def main() -> None:
     # clean
     subparsers.add_parser("clean", help="Prune low-score papers outside fetch window")
 
+    # export
+    p_export = subparsers.add_parser(
+        "export", help="Generate a standalone annotated bibliography"
+    )
+    p_export.add_argument(
+        "--from",
+        dest="from_file",
+        required=True,
+        metavar="FILE",
+        help="DOI source: plain text (one per line) or .bib file",
+    )
+    p_export.add_argument(
+        "--output",
+        default="site/bibliography.html",
+        metavar="PATH",
+        help="Output HTML path (default: site/bibliography.html)",
+    )
+    p_export.add_argument(
+        "--title",
+        default="Annotated Bibliography",
+        metavar="TEXT",
+        help="Page title",
+    )
+    p_export.add_argument(
+        "--interests",
+        default=None,
+        metavar="PATH",
+        help="Custom interests.md for Sonnet re-annotation",
+    )
+    p_export.add_argument(
+        "--ignore-errors",
+        action="store_true",
+        default=False,
+        help="Skip BibTeX entries missing a DOI without prompting",
+    )
+
     args = parser.parse_args()
 
     if args.command is None or args.help:
@@ -354,5 +513,6 @@ def main() -> None:
         "seed": seed,
         "cite": cite,
         "clean": clean,
+        "export": export,
     }
     dispatch[args.command](args)

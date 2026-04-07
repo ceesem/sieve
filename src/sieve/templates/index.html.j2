@@ -62,7 +62,7 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
-body { font-family: var(--font); background: var(--bg); color: var(--fg); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; transition: background 0.2s, color 0.2s; }
+body { font-family: var(--font); background: var(--bg); color: var(--fg); font-size: 14px; line-height: 1.5; -webkit-font-smoothing: antialiased; transition: background 0.2s, color 0.2s; scrollbar-gutter: stable; }
 .theme-toggle { background: none; border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 0 10px; height: 28px; font-size: 12px; font-family: var(--font); color: var(--muted); cursor: pointer; transition: border-color 0.12s, color 0.12s; display: inline-flex; align-items: center; justify-content: center; }
 .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
 
@@ -75,7 +75,7 @@ header { padding-bottom: 18px; margin-bottom: 24px; border-bottom: 1px solid var
 
 .layout { display: flex; align-items: flex-start; }
 
-.sidebar { width: 204px; flex-shrink: 0; position: sticky; top: 28px; max-height: calc(100vh - 56px); overflow-y: auto; background: var(--sidebar-bg); border-radius: var(--radius); padding: 16px 14px; }
+.sidebar { width: 204px; flex-shrink: 0; position: sticky; top: 28px; max-height: calc(100vh - 56px); overflow-y: auto; scrollbar-gutter: stable; background: var(--sidebar-bg); border-radius: var(--radius); padding: 16px 14px; }
 
 .nav { margin-bottom: 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
 .nav-btn { display: block; width: 100%; text-align: left; padding: 7px 10px; border: none; background: none; cursor: pointer; font-size: 13px; font-weight: 600; font-family: var(--font); color: var(--muted); border-radius: var(--radius-sm); margin-bottom: 2px; transition: background 0.12s, color 0.12s; }
@@ -185,6 +185,7 @@ kbd { display: inline-block; padding: 1px 6px; border: 1px solid var(--border); 
       <h3>Actions</h3>
       <div class="kbd-row"><span>Mark read / unread</span> <kbd>m</kbd></div>
       <div class="kbd-row"><span>Toggle reading list</span> <kbd>l</kbd></div>
+      <div class="kbd-row"><span>Toggle abstract</span> <kbd>a</kbd></div>
       <div class="kbd-row"><span>Send to Zotero</span> <kbd>i</kbd></div>
     </div>
     <div class="kbd-close">Press <kbd>?</kbd> or <kbd>Esc</kbd> to close</div>
@@ -197,7 +198,7 @@ kbd { display: inline-block; padding: 1px 6px; border: 1px solid var(--border); 
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="42" height="42" style="flex-shrink:0;border-radius:7px"><defs><linearGradient id="hbg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#1e66f5"/><stop offset="100%" stop-color="#8839ef"/></linearGradient><linearGradient id="hfg" x1="100%" y1="100%" x2="0%" y2="0%"><stop offset="0%" stop-color="#1e66f5"/><stop offset="100%" stop-color="#8839ef"/></linearGradient></defs><rect width="32" height="32" rx="7" fill="url(#hbg)"/><path d="M7 9h18l-7 9v6l-4-2v-4z" fill="url(#hfg)" stroke="white" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>
       <div>
         <h1>Literature Sieve</h1>
-        <div class="summary" id="summary-line">{{ summary.unread }} unread on feed · {{ summary.rl_unread }} unread on list · {{ summary.high_score }} scored &ge;{{ display_threshold }} · last fetched {{ summary.last_fetched or 'never' }} · generated {{ generated_at }}</div>
+        <div class="summary" id="summary-line">{{ summary.unread }} unread on feed · {{ summary.rl_unread }} unread on list · {{ summary.high_score }} scored &ge;{{ display_threshold }} · last fetched {{ summary.last_fetched or 'never' }} · generated {{ generated_at }} · v{{ sieve_version }}</div>
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;">
@@ -389,13 +390,14 @@ async function checkServer() {
     label.textContent = 'Offline';
     badge.title = 'Server offline — run sieve serve to enable write actions';
   }
-  if (!serverAvailable) {
-    document.querySelectorAll('.server-only').forEach(el => {
-      el.disabled = true;
-      el.title = 'Start sieve serve to enable';
-    });
-  }
-  render();
+  document.querySelectorAll('#paper-list .actions button').forEach(btn => {
+    btn.disabled = !serverAvailable;
+    if (!serverAvailable) btn.title = 'Start sieve-serve to enable';
+    else if (btn.title === 'Start sieve-serve to enable') btn.title = '';
+  });
+  document.querySelectorAll('.sidebar-action button.server-only').forEach(btn => {
+    btn.disabled = !serverAvailable;
+  });
 }
 checkServer();
 setInterval(checkServer, 10000);
@@ -550,8 +552,9 @@ async function refreshSummary() {
     if (d.status !== 'ok') return;
     const el = document.getElementById('summary-line');
     if (!el) return;
-    const generated = el.textContent.match(/generated (.+)$/)?.[1] || '';
-    el.textContent = `${d.unread} unread on feed \u00b7 ${d.rl_unread} unread on list \u00b7 ${d.high_score} scored \u2265${d.display_threshold} \u00b7 last fetched ${d.last_fetched || 'never'} \u00b7 generated ${generated}`;
+    const generated = el.textContent.match(/generated ([^ ·]+)/)?.[1] || '';
+    const ver = el.textContent.match(/· v(\S+)$/)?.[1] || '';
+    el.textContent = `${d.unread} unread on feed \u00b7 ${d.rl_unread} unread on list \u00b7 ${d.high_score} scored \u2265${d.display_threshold} \u00b7 last fetched ${d.last_fetched || 'never'} \u00b7 generated ${generated}${ver ? ` \u00b7 v${ver}` : ''}`;
   } catch {}
 }
 
@@ -609,7 +612,6 @@ async function toggleRL(doi, btn) {
     if (p) p.reading_list = p.reading_list ? 0 : 1;
     btn.classList.toggle('active');
     btn.closest('.paper').classList.toggle('on-reading-list');
-    if (activeTab === 'reading-list' && !p.reading_list) render();
     refreshSummary();
   } catch {}
 }
@@ -671,7 +673,7 @@ document.addEventListener('keydown', e => {
   if (e.key === '?') { toggleKbd(); return; }
   if (document.getElementById('kbd-modal').classList.contains('open')) return;
   if (e.key === '[' || e.key === ']') { switchTab(activeTab === 'feed' ? 'reading-list' : 'feed'); return; }
-  if (!['j', 'k', 'l', 'i', 'm', 'g', 'G', 'Enter'].includes(e.key)) return;
+  if (!['j', 'k', 'l', 'i', 'm', 'g', 'G', 'Enter', 'a'].includes(e.key)) return;
   const papers = Array.from(document.querySelectorAll('#paper-list .paper'));
   if (!papers.length) return;
   const currentEl = papers.find(p => p.dataset.doi === selectedDoi) ?? null;
@@ -720,6 +722,10 @@ document.addEventListener('keydown', e => {
     const selector = activeTab === 'reading-list' ? 'button[onclick^="toggleRlRead"]' : 'button[onclick^="toggleSeen"]';
     const btn = currentEl.querySelector(selector);
     if (btn && !btn.disabled) btn.click();
+  } else if (e.key === 'a' && currentEl) {
+    e.preventDefault();
+    const btn = currentEl.querySelector('.toggle-abstract');
+    if (btn) btn.click();
   } else if (e.key === 'Enter' && currentEl) {
     e.preventDefault();
     const link = currentEl.querySelector('.paper-title a');

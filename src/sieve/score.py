@@ -438,3 +438,53 @@ def score_papers(
             f.unlink(missing_ok=True)
         manifest_path.unlink(missing_ok=True)
         logger.info("Staging files cleared")
+
+
+def annotate_papers(
+    papers: list[dict],
+    interests_text: str,
+    batch_size: int = 15,
+) -> dict[str, dict]:
+    """Run a Sonnet-only annotation pass with a custom interests profile.
+
+    Returns {doi: {score, reason}} without touching the DB.
+    No Haiku triage — papers are already hand-picked by DOI.
+    """
+    import tempfile
+
+    batch_data = [
+        {
+            "doi": p["doi"],
+            "title": p["title"],
+            "abstract": (p.get("abstract") or "")[:1800],
+            "score": p.get("score", 5),
+            "match_basis": p.get("match_basis"),
+        }
+        for p in papers
+    ]
+    batches = [
+        batch_data[i : i + batch_size] for i in range(0, len(batch_data), batch_size)
+    ]
+
+    results: dict[str, dict] = {}
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+
+        def _run(si: int) -> list | None:
+            prompt = _build_sonnet_prompt(interests_text, batches[si])
+            return _run_claude(
+                "claude-sonnet-4-6", prompt, tmp / f"out_{si}.json", si, "sonnet"
+            )
+
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            futures = {ex.submit(_run, si): si for si in range(len(batches))}
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    for r in result:
+                        if r.get("doi"):
+                            results[r["doi"]] = {
+                                "score": r.get("score"),
+                                "reason": r.get("reason"),
+                            }
+    return results

@@ -4,7 +4,7 @@ build-backend = "uv_build"
 
 [project]
 name = "sieve"
-version = "0.0.0"
+version = "0.1"
 description = "Literature Sieve"
 
 requires-python = ">=3.10"
@@ -27,7 +27,9 @@ sieve = "sieve.cli:main"
 
 [dependency-groups]
 dev = [
+    "bump-my-version",
     "ipykernel",
+    "pytest>=8",
 ]
 lint = [
     "ruff",
@@ -38,6 +40,19 @@ default-groups = [
     "dev",
     "lint",
 ]
+
+[tool.bumpversion]
+current_version = "0.1"
+parse = "(?P<major>\\d+)\\.(?P<minor>\\d+)"
+serialize = ["{major}.{minor}"]
+commit = true
+tag = true
+tag_name = "v{new_version}"
+
+[[tool.bumpversion.files]]
+filename = "pyproject.toml"
+search = 'version = "{current_version}"'
+replace = 'version = "{new_version}"'
 
 # Ruff configuration - minimal rules to start
 # See https://docs.astral.sh/ruff/rules/ for available rules
