@@ -19,6 +19,7 @@ uv run ruff format src/
 | `sieve seed --doi <DOI>` | Evaluate a paper and optionally update interests |
 | `sieve cite --doi <DOI>` | Fetch and score a citation graph |
 | `sieve clean` | Prune low-score papers outside fetch window |
+| `sieve export --from FILE` | Generate standalone annotated bibliography HTML |
 | `poe lab` | Launch Jupyter Lab |
 
 ## Architecture & Key Files

@@ -118,6 +118,7 @@ sieve serve     # open the site in your browser
 | `sieve seed --doi <DOI> [--pdf PATH]` | Evaluate a paper and optionally update your interests profile |
 | `sieve cite --doi <DOI> [--forward] [--recommend] [--site-threshold N]` | Score the citation graph of a paper |
 | `sieve clean` | Prune low-score papers outside the fetch window |
+| `sieve export --from FILE [--output PATH] [--title TEXT] [--interests PATH]` | Generate a standalone annotated bibliography HTML |
 
 `--site-threshold N` overrides the `site_threshold` from settings for that run (useful for one-off exploration without changing your config). `--pdf PATH` on `seed` lets you supply a local PDF when the DOI fetch doesn't yield a full abstract.
 
@@ -155,6 +156,26 @@ sieve seed --doi 10.1038/s41593-022-01107-4
 
 Claude evaluates whether the paper represents a gap in your `interests.md` and suggests an addition. You confirm before anything is written.
 
+### Annotated bibliography (`sieve export`)
+
+Generate a standalone HTML bibliography from a list of DOIs — useful for sharing a curated reading list or preparing a literature review.
+
+```bash
+# From a plain-text file (one DOI per line, # comments ignored)
+sieve export --from dois.txt
+
+# From a BibTeX file
+sieve export --from refs.bib --output report/bibliography.html --title "My Reading List"
+
+# Re-annotate with a custom interests profile (re-scores via Sonnet; does not modify DB)
+sieve export --from refs.bib --interests config/interests_project.md
+```
+
+Papers must already be in your local database (run `sieve cite` or `sieve run` first to ingest them). DOIs missing from the DB are reported but don't abort the export.
+
+For BibTeX input, `sieve export` requires every entry to have a `doi` field. If any are missing it will prompt before continuing — pass `--ignore-errors` to skip the prompt and proceed anyway.
+
+Output defaults to `site/bibliography.html`.
 
 ---
 
