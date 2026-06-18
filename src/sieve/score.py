@@ -5,11 +5,37 @@ import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
+from . import db
 from .settings import PROJECT_ROOT, Settings
 
 logger = logging.getLogger(__name__)
 
 STAGING_DIR = PROJECT_ROOT / "data" / "staging"
+
+# Cap on how many explicit negative examples are injected into the Sonnet
+# precision pass, to keep the per-batch prompt bounded.
+MAX_NEGATIVE_EXAMPLES = 40
+
+
+def _format_negative_examples(negatives: list[dict]) -> str:
+    """Bullet list of flagged 'less like this' papers for the Sonnet pass.
+
+    Includes the abstract so the model can judge genuine resemblance, not just
+    title overlap. Capped at MAX_NEGATIVE_EXAMPLES to bound the per-batch cost,
+    since this rides along on every Sonnet scoring call.
+    """
+    lines = []
+    for n in negatives[:MAX_NEGATIVE_EXAMPLES]:
+        header = [f"- {n.get('title') or '(untitled)'}"]
+        if n.get("match_basis"):
+            header.append(f" (matched: {n['match_basis']})")
+        if n.get("reason"):
+            header.append(f" — {n['reason']}")
+        entry = ["".join(header)]
+        if n.get("abstract"):
+            entry.append(f"  abstract: {n['abstract']}")
+        lines.append("\n".join(entry))
+    return "\n".join(lines)
 
 
 def _build_haiku_prompt(interests_text: str, batch_data: list[dict]) -> str:
@@ -64,7 +90,22 @@ Output only valid JSON. No preamble, no markdown fences, no explanation
 outside the JSON array."""
 
 
-def _build_sonnet_prompt(interests_text: str, batch_data: list[dict]) -> str:
+def _build_sonnet_prompt(
+    interests_text: str, batch_data: list[dict], negatives_block: str = ""
+) -> str:
+    negatives_section = ""
+    if negatives_block:
+        negatives_section = f"""\
+
+The researcher has explicitly flagged the papers below as false positives —
+"less like this". When a paper under review closely resembles one of them in
+topic or approach, lower its score accordingly. Apply this narrowly: recall
+matters more than precision, so only down-weight clear resemblances, never
+borderline or merely adjacent work.
+
+Flagged as "less like this":
+{negatives_block}
+"""
     return f"""\
 These papers passed a coarse Haiku pre-filter. Re-evaluate each one
 carefully against the researcher's interests and assign a refined score.
@@ -99,7 +140,7 @@ shell, bash, or python operations. Return only the final JSON array.
 
 Researcher profile (from interests.md):
 {interests_text}
-
+{negatives_section}
 Papers to score:
 {json.dumps(batch_data, indent=2)}
 
@@ -186,7 +227,7 @@ def _run_claude(
             ],
             capture_output=True,
             text=True,
-            timeout=300,
+            timeout=600,
         )
 
         parsed = _parse_stdout_result(result.stdout, batch_idx, stage)
@@ -276,7 +317,7 @@ def score_papers(
             {
                 "doi": p["doi"],
                 "title": p["title"],
-                "abstract": p.get("abstract", "")[:1800],
+                "abstract": p.get("abstract", ""),
             }
             for p in batch
         ]
@@ -287,7 +328,6 @@ def score_papers(
 
     # --- Stage 1: Haiku scoring (parallel, max 4 workers) ---
     def _haiku_batch(i: int) -> tuple[int, list | None]:
-        input_path = STAGING_DIR / f"to_score_{i}.json"
         scored_path = STAGING_DIR / f"scored_{i}.json"
         if scored_path.exists():
             try:
@@ -347,6 +387,12 @@ def score_papers(
     logger.info(
         f"{len(all_survivors)} survivors across {len(sonnet_batches)} Sonnet batch(es)"
     )
+
+    # Explicit "less like this" examples sharpen the precision pass only — they
+    # never reach the Haiku triage gate, so they cannot cause recall losses.
+    negatives_block = _format_negative_examples(db.get_negative_examples())
+    if negatives_block:
+        logger.info("Injecting negative examples into Sonnet precision pass")
     if sonnet_start_callback and sonnet_batches:
         sonnet_start_callback(len(sonnet_batches))
 
@@ -363,7 +409,7 @@ def score_papers(
                 logger.warning(f"Sonnet batch {si}: cached file invalid, re-reasoning")
                 output_path.unlink()
         input_path.write_text(json.dumps(chunk, indent=2))
-        prompt = _build_sonnet_prompt(interests_text, chunk)
+        prompt = _build_sonnet_prompt(interests_text, chunk, negatives_block)
         result = _run_claude(
             "claude-sonnet-4-6",
             prompt,
@@ -456,7 +502,7 @@ def annotate_papers(
         {
             "doi": p["doi"],
             "title": p["title"],
-            "abstract": (p.get("abstract") or "")[:1800],
+            "abstract": (p.get("abstract") or ""),
             "score": p.get("score", 5),
             "match_basis": p.get("match_basis"),
         }

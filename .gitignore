@@ -114,3 +114,4 @@ site/
 # Sieve personal config (copy *.example to get started)
 config/settings.yaml
 config/interests.md
+tests/__pycache__/test_export.cpython-313-pytest-9.0.2.pyc

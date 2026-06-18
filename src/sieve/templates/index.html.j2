@@ -185,6 +185,7 @@ kbd { display: inline-block; padding: 1px 6px; border: 1px solid var(--border); 
       <h3>Actions</h3>
       <div class="kbd-row"><span>Mark read / unread</span> <kbd>m</kbd></div>
       <div class="kbd-row"><span>Toggle reading list</span> <kbd>l</kbd></div>
+      <div class="kbd-row"><span>Less like this</span> <kbd>n</kbd></div>
       <div class="kbd-row"><span>Toggle abstract</span> <kbd>a</kbd></div>
       <div class="kbd-row"><span>Send to Zotero</span> <kbd>i</kbd></div>
     </div>
@@ -492,8 +493,8 @@ function render() {
     const url = p.url || (p.doi && !p.doi.startsWith('arxiv:') ? `https://doi.org/${p.doi}` : p.url);
     const dis = srv ? '' : ' disabled title="Start sieve-serve to enable"';
     const readBtn = isRL
-      ? `<button class="read-toggle" onclick="toggleRlRead('${p.doi}', this)"${dis}>${p.rl_read ? 'Mark unread' : 'Mark read'}</button>`
-      : `<button class="read-toggle" onclick="toggleSeen('${p.doi}', this)"${dis}>${p.seen ? 'Mark unread' : 'Mark read'}</button>`;
+      ? `<button class="read-toggle" data-key="m" onclick="toggleRlRead('${p.doi}', this)"${dis}>${p.rl_read ? 'Mark unread' : 'Mark read'}</button>`
+      : `<button class="read-toggle" data-key="m" onclick="toggleSeen('${p.doi}', this)"${dis}>${p.seen ? 'Mark unread' : 'Mark read'}</button>`;
     return `
     <div class="paper${seenCls}${rlReadCls}${rlCls}${unreadCls}" data-idx="${i}" data-doi="${p.doi}">
       <div class="paper-header">
@@ -504,12 +505,13 @@ function render() {
             ${fmtAuthors(p.authors)} · ${p.published_date || ''} · <span class="source-badge">${p.journal || p.source}</span> · <button class="doi-copy" onclick="copyDoi(event, '${p.doi}')" title="Copy DOI">${p.doi}</button>
           </div>
           ${p.reason ? `<div class="paper-reason">${p.reason}</div>` : ''}
-          ${p.abstract ? `<button class="toggle-abstract" onclick="toggleAbstract(this)">abstract</button><div class="paper-abstract">${p.abstract}</div>` : ''}
+          ${p.abstract ? `<button class="toggle-abstract" data-key="a" onclick="toggleAbstract(this)">abstract</button><div class="paper-abstract">${p.abstract}</div>` : ''}
           <div class="actions">
             ${readBtn}
-            <button class="${p.reading_list ? 'active' : ''}" onclick="toggleRL('${p.doi}', this)"${dis}>Reading list</button>
+            <button class="${p.reading_list ? 'active' : ''}" data-key="l" onclick="toggleRL('${p.doi}', this)"${dis}>Reading list</button>
+            <button class="${p.is_negative ? 'active' : ''}" data-key="n" onclick="toggleNegative('${p.doi}', this)"${dis} title="Add to negative examples — fewer papers like this">Less like this</button>
             <button onclick="showNote('${p.doi}', this)"${dis}>Note</button>
-            <button class="action-btn server-only" onclick="sendToZotero('${p.doi}', this)"${dis}>Zotero ↗</button>
+            <button class="action-btn server-only" data-key="i" onclick="sendToZotero('${p.doi}', this)"${dis}>Zotero ↗</button>
           </div>
           ${p.notes ? `<div class="note-area"><textarea onblur="saveNote('${p.doi}', this)">${p.notes}</textarea></div>` : ''}
         </div>
@@ -616,6 +618,16 @@ async function toggleRL(doi, btn) {
   } catch {}
 }
 
+async function toggleNegative(doi, btn) {
+  try {
+    const r = await fetch('/toggle-negative', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({doi})});
+    const data = await r.json();
+    const p = PAPERS.find(x => x.doi === doi);
+    if (p) p.is_negative = data.is_negative;
+    btn.classList.toggle('active', !!data.is_negative);
+  } catch {}
+}
+
 function showNote(doi, btn) {
   const card = btn.closest('.paper');
   if (card.querySelector('.note-area')) return;
@@ -673,7 +685,7 @@ document.addEventListener('keydown', e => {
   if (e.key === '?') { toggleKbd(); return; }
   if (document.getElementById('kbd-modal').classList.contains('open')) return;
   if (e.key === '[' || e.key === ']') { switchTab(activeTab === 'feed' ? 'reading-list' : 'feed'); return; }
-  if (!['j', 'k', 'l', 'i', 'm', 'g', 'G', 'Enter', 'a'].includes(e.key)) return;
+  if (!['j', 'k', 'g', 'G', 'Enter'].includes(e.key) && !document.querySelector(`#paper-list .paper [data-key="${e.key}"]`)) return;
   const papers = Array.from(document.querySelectorAll('#paper-list .paper'));
   if (!papers.length) return;
   const currentEl = papers.find(p => p.dataset.doi === selectedDoi) ?? null;
@@ -683,20 +695,12 @@ document.addEventListener('keydown', e => {
   if (e.key === 'j' || e.key === 'k') {
     e.preventDefault();
     const nextIdx = e.key === 'j'
-      ? (currentIdx < papers.length - 1 ? currentIdx + 1 : 0)
-      : (currentIdx > 0 ? currentIdx - 1 : papers.length - 1);
+      ? Math.min(currentIdx + 1, papers.length - 1)
+      : Math.max(currentIdx - 1, 0);
     papers.forEach(p => p.classList.remove('selected'));
     papers[nextIdx].classList.add('selected');
     selectedDoi = papers[nextIdx].dataset.doi;
     papers[nextIdx].scrollIntoView({block: 'nearest'});
-  } else if (e.key === 'l' && currentEl) {
-    e.preventDefault();
-    const btn = currentEl.querySelector('button[onclick^="toggleRL"]');
-    if (btn && !btn.disabled) btn.click();
-  } else if (e.key === 'i' && currentEl) {
-    e.preventDefault();
-    const btn = currentEl.querySelector('button[onclick^="sendToZotero"]');
-    if (btn && !btn.disabled) btn.click();
   } else if (e.key === 'G') {
     e.preventDefault();
     const last = papers[papers.length - 1];
@@ -717,19 +721,13 @@ document.addEventListener('keydown', e => {
       lastKey = 'g'; lastKeyTime = now;
     }
     return;
-  } else if (e.key === 'm' && currentEl) {
-    e.preventDefault();
-    const selector = activeTab === 'reading-list' ? 'button[onclick^="toggleRlRead"]' : 'button[onclick^="toggleSeen"]';
-    const btn = currentEl.querySelector(selector);
-    if (btn && !btn.disabled) btn.click();
-  } else if (e.key === 'a' && currentEl) {
-    e.preventDefault();
-    const btn = currentEl.querySelector('.toggle-abstract');
-    if (btn) btn.click();
   } else if (e.key === 'Enter' && currentEl) {
     e.preventDefault();
     const link = currentEl.querySelector('.paper-title a');
     if (link) window.open(link.href, '_blank', 'noopener');
+  } else if (currentEl) {
+    const btn = currentEl.querySelector(`[data-key="${e.key}"]`);
+    if (btn && !btn.disabled) { e.preventDefault(); btn.click(); }
   }
 });
 

@@ -11,6 +11,7 @@ from .fetch import fetch_all
 from .generate import build_bibliography, build_site
 from .ingest import ingest_batch
 from .score import score_papers
+from .seed import learn as learn_interests
 from .seed import seed as seed_paper
 from .settings import load_settings
 
@@ -49,8 +50,13 @@ def _print_help():
     table.add_row("serve", "Build site and start local server with write-back", "")
     table.add_row(
         "seed",
-        "Evaluate a paper and optionally update interests",
+        "Bootstrap interests from a single paper (cold start)",
         "--doi DOI [--pdf PATH]",
+    )
+    table.add_row(
+        "learn",
+        "Tune interests from your reading list + negative examples",
+        "[--min-examples N]",
     )
     table.add_row(
         "cite",
@@ -184,6 +190,19 @@ def run(args=None) -> None:
     )
 
 
+def _find_free_port(start: int = 8000, end: int = 8020) -> int:
+    import socket
+
+    for port in range(start, end + 1):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", port))
+                return port
+            except OSError:
+                continue
+    raise RuntimeError(f"No free port found in range {start}–{end}")
+
+
 def serve(args=None) -> None:
     import uvicorn
 
@@ -193,6 +212,12 @@ def serve(args=None) -> None:
     from rich.console import Console
 
     console = Console()
+
+    deleted = db.prune_papers(settings.site_threshold, settings.lookback_days)
+    if deleted:
+        console.print(
+            f"Pruned [bold]{deleted}[/bold] low-score papers outside the fetch window."
+        )
 
     summary = db.get_summary(
         settings.display_threshold,
@@ -207,16 +232,20 @@ def serve(args=None) -> None:
 
     build_site(settings)
 
+    port = _find_free_port()
+    if port != 8000:
+        console.print(f"[yellow]Port 8000 in use — using port {port}[/yellow]")
+
     def _open():
         time.sleep(0.5)
-        webbrowser.open("http://localhost:8000")
+        webbrowser.open(f"http://localhost:{port}")
 
     threading.Thread(target=_open, daemon=True).start()
 
     from .server import app
 
     server = uvicorn.Server(
-        uvicorn.Config(app, host="localhost", port=8000, log_level="warning")
+        uvicorn.Config(app, host="localhost", port=port, log_level="warning")
     )
 
     def _quit_on_enter():
@@ -307,6 +336,15 @@ def cite(args) -> None:
 def seed(args) -> None:
     db.init_db()
     seed_paper(doi=args.doi, pdf=getattr(args, "pdf", None))
+
+
+def learn(args) -> None:
+    db.init_db()
+    learn_interests(
+        min_examples=args.min_examples,
+        recent_k=None if args.all else args.recent,
+        older_sample=args.older_sample,
+    )
 
 
 def _parse_doi_file(path: str, ignore_errors: bool) -> list[str]:
@@ -445,6 +483,38 @@ def main() -> None:
     p_seed.add_argument("--doi", default=None, metavar="DOI")
     p_seed.add_argument("--pdf", default=None, metavar="PATH")
 
+    # learn
+    p_learn = subparsers.add_parser(
+        "learn", help="Tune interests from reading list + negative examples"
+    )
+    p_learn.add_argument(
+        "--min-examples",
+        type=int,
+        default=3,
+        metavar="N",
+        help="Minimum flagged examples required before proposing edits (default: 3)",
+    )
+    p_learn.add_argument(
+        "--recent",
+        type=int,
+        default=50,
+        metavar="K",
+        help="Most-recently-saved reading-list papers to always include (default: 50)",
+    )
+    p_learn.add_argument(
+        "--older-sample",
+        type=int,
+        default=25,
+        metavar="M",
+        help="Random sample of older reading-list papers to add (default: 25)",
+    )
+    p_learn.add_argument(
+        "--all",
+        action="store_true",
+        default=False,
+        help="Use the entire reading list, ignoring recency sampling",
+    )
+
     # cite
     p_cite = subparsers.add_parser("cite", help="Fetch and score a citation graph")
     p_cite.add_argument("--doi", required=True, metavar="DOI")
@@ -511,6 +581,7 @@ def main() -> None:
         "run": run,
         "serve": serve,
         "seed": seed,
+        "learn": learn,
         "cite": cite,
         "clean": clean,
         "export": export,

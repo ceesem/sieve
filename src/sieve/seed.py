@@ -1,16 +1,17 @@
 import json
 import logging
 import re
+import shutil
 import subprocess
 import threading
 from datetime import datetime
-from pathlib import Path
 
 import httpx
 from rich.console import Console
 from rich.padding import Padding
 from rich.panel import Panel
 
+from . import db
 from .settings import PROJECT_ROOT
 
 logger = logging.getLogger(__name__)
@@ -344,3 +345,343 @@ Write the updated file to {interests_path}."""
     }
     with open(LOG_PATH, "a") as f:
         f.write(json.dumps(log_entry) + "\n")
+
+
+# ---------------------------------------------------------------------------
+# learn — tune interests.md from accumulated database signals
+# ---------------------------------------------------------------------------
+
+LEARN_LOG_PATH = PROJECT_ROOT / "data" / "logs" / "learn.jsonl"
+INTERESTS_BACKUP_DIR = PROJECT_ROOT / "data" / "backups"
+
+
+def _format_examples(papers: list[dict]) -> str:
+    """Signal-dense rendering of example papers for the learn prompt.
+
+    Includes the full abstract — it is the ground truth about what the paper is
+    about, and the strongest signal for inferring recurring interests. The
+    sampling cap (see db.get_positive_examples) keeps the total bounded.
+    """
+    lines = []
+    for p in papers:
+        parts = [f"- {p.get('title') or '(untitled)'}"]
+        meta = []
+        if p.get("journal"):
+            meta.append(p["journal"])
+        if p.get("score") is not None:
+            meta.append(f"score {p['score']}")
+        if p.get("match_basis"):
+            meta.append(f"matched: {p['match_basis']}")
+        if meta:
+            parts.append(f"  ({'; '.join(meta)})")
+        if p.get("reason"):
+            parts.append(f"  why it matched: {p['reason']}")
+        if p.get("abstract"):
+            parts.append(f"  abstract: {p['abstract']}")
+        lines.append("\n".join(parts))
+    return "\n".join(lines)
+
+
+def _build_learn_prompt(
+    interests_text: str, positives: list[dict], negatives: list[dict]
+) -> str:
+    pos_block = _format_examples(positives) or "(none)"
+    neg_block = _format_examples(negatives) or "(none)"
+    return f"""\
+You are tuning a researcher's interests profile (interests.md). An LLM uses this
+profile to score incoming papers for relevance. You are given the current profile
+and two sets of examples drawn from the researcher's own behavior:
+
+  - SAVED PAPERS — added to their reading list. These are "more like this".
+  - NEGATIVE EXAMPLES — explicitly flagged "less like this".
+
+Propose minimal, surgical edits to interests.md that would make the scorer better
+reflect these signals. You may ADD new lines, REVISE existing lines (to sharpen
+vague wording, make a line more specific, or merge redundant ones), and REMOVE
+lines — but removal is the most aggressive action; use it sparingly.
+
+Bias strongly toward RECALL over precision. The scorer is a permissive triage
+filter, and missing a relevant paper is worse than admitting a borderline one.
+Therefore:
+- ADD liberally: new lines that broaden or sharpen what counts as relevant,
+  grounded in recurring themes across the saved papers. A new narrow exclusion
+  is also an addition (phrase it as "...only when purely about X").
+- REVISE for clarity: rewrite a vague or overly broad existing line to be more
+  specific and useful, or merge two redundant lines into one. When a revision
+  NARROWS scope, be conservative — only when negatives show a clear pattern.
+- REMOVE conservatively: only a line that is clearly stale (no longer reflected
+  in any saved paper), fully redundant with another line, or persistently driving
+  false positives. When in doubt, prefer a revision, or propose nothing. Never
+  remove a still-relevant interest just to tidy up.
+- For REVISE and REMOVE, copy the "before"/"text" field VERBATIM from the current
+  interests.md (exact characters) so the edit can be applied precisely.
+- Do not restate anything already covered by the profile.
+- A handful of weak examples may warrant zero edits. That is a valid result.
+
+Do not ask for permission. Do not mention tools. Return only the final JSON object.
+
+Current interests.md:
+{interests_text}
+
+SAVED PAPERS (more like this):
+{pos_block}
+
+NEGATIVE EXAMPLES (less like this):
+{neg_block}
+
+Output only valid JSON, no preamble or markdown fences:
+{{
+  "summary": "1-3 sentences naming the patterns you found",
+  "additions": [{{"section": "section name", "text": "exact line to add"}}],
+  "revisions": [{{"section": "section name", "before": "exact existing line",
+                 "after": "rewritten line", "rationale": "why"}}],
+  "removals": [{{"section": "section name", "text": "exact existing line",
+                "rationale": "why it is safe to remove"}}]
+}}"""
+
+
+def _section(e: dict) -> str:
+    s = e.get("section", "")
+    return f"[dim]{s}[/dim] — " if s else ""
+
+
+def _render_additions(edits: list[dict]) -> None:
+    for e in edits:
+        console.print(
+            Padding(f"[green]+[/green] {_section(e)}{e.get('text', '')}", (0, 2))
+        )
+
+
+def _render_revisions(edits: list[dict]) -> None:
+    for e in edits:
+        rationale = e.get("rationale", "")
+        console.print(Padding(f"[cyan]~[/cyan] {_section(e)}", (0, 2)))
+        console.print(Padding(f"[red]- {e.get('before', '')}[/red]", (0, 4)))
+        console.print(Padding(f"[green]+ {e.get('after', '')}[/green]", (0, 4)))
+        if rationale:
+            console.print(Padding(f"[dim]{rationale}[/dim]", (0, 4)))
+
+
+def _render_removals(edits: list[dict]) -> None:
+    for e in edits:
+        rationale = e.get("rationale", "")
+        rat = f"  [dim]({rationale})[/dim]" if rationale else ""
+        console.print(
+            Padding(f"[red]-[/red] {_section(e)}{e.get('text', '')}{rat}", (0, 2))
+        )
+
+
+def _backup_interests(interests_path):
+    """Copy interests.md to a timestamped backup before a destructive edit."""
+    INTERESTS_BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+    dest = INTERESTS_BACKUP_DIR / f"interests-{stamp}.md"
+    shutil.copy2(interests_path, dest)
+    return dest
+
+
+def learn(
+    min_examples: int = 3, recent_k: int | None = 50, older_sample: int = 25
+) -> None:
+    """Propose interests.md edits from accumulated reading-list / negative signals.
+
+    recent_k / older_sample tune the graded recency sample of reading-list
+    positives (see db.get_positive_examples); recent_k=None uses every saved paper.
+    """
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    LEARN_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    interests_path = PROJECT_ROOT / "config" / "interests.md"
+    interests_text = interests_path.read_text()
+
+    positives = db.get_positive_examples(recent_k=recent_k, older_sample=older_sample)
+    negatives = db.get_negative_examples()
+    total = len(positives) + len(negatives)
+
+    console.print(
+        f"Learning from [bold]{len(positives)}[/bold] reading-list paper(s) and "
+        f"[bold]{len(negatives)}[/bold] negative example(s)."
+    )
+    if total < min_examples:
+        console.print(
+            f"[yellow]Too few examples ({total} < {min_examples}) to learn from "
+            f"reliably.[/yellow] Browse and flag more papers, or bootstrap with "
+            f"[bold]sieve seed --doi DOI[/bold]."
+        )
+        return
+
+    prompt = _build_learn_prompt(interests_text, positives, negatives)
+    result: dict = {}
+    t = threading.Thread(
+        target=_run_claude,
+        args=(
+            [
+                "claude",
+                "-p",
+                "--model",
+                "claude-sonnet-4-6",
+                "--tools",
+                "",
+                "--permission-mode",
+                "dontAsk",
+                "--output-format",
+                "json",
+                prompt,
+            ],
+            300,
+            result,
+        ),
+    )
+    t.start()
+    with console.status("Analyzing your saved and rejected papers…"):
+        t.join()
+
+    proposal = _parse_stdout_object(result.get("stdout", ""))
+    if not proposal:
+        console.print("[red]Learning failed — Claude did not produce output.[/red]")
+        return
+
+    additions = proposal.get("additions") or []
+    revisions = proposal.get("revisions") or []
+    removals = proposal.get("removals") or []
+
+    console.print()
+    console.print(
+        Panel(
+            proposal.get("summary", "(no summary)"),
+            title="[bold]What I found[/bold]",
+            border_style="dim",
+        )
+    )
+
+    if not (additions or revisions or removals):
+        console.print(
+            "\n[dim]No edits proposed — your interests already cover these signals.[/dim]"
+        )
+        _log_learn(positives, negatives, proposal, {})
+        return
+
+    # Per-bucket review and confirmation: additions are safe, revisions rewrite a
+    # line in place, removals delete one — so each is confirmed separately, letting
+    # you take the safe edits while declining a risky rewrite or deletion.
+    apply_add, apply_rev, apply_rem = [], [], []
+    if additions:
+        console.print("\n[bold green]Add[/bold green]  [dim](new lines)[/dim]")
+        _render_additions(additions)
+        if _ask(f"\nApply {len(additions)} addition(s)? [y/n]:") == "y":
+            apply_add = additions
+    if revisions:
+        console.print("\n[bold cyan]Revise[/bold cyan]  [dim](rewrite in place)[/dim]")
+        _render_revisions(revisions)
+        if _ask(f"\nApply {len(revisions)} revision(s)? [y/n]:") == "y":
+            apply_rev = revisions
+    if removals:
+        console.print("\n[bold red]Remove[/bold red]  [dim](delete lines)[/dim]")
+        _render_removals(removals)
+        if _ask(f"\nApply {len(removals)} removal(s)? [y/n]:") == "y":
+            apply_rem = removals
+
+    if not (apply_add or apply_rev or apply_rem):
+        console.print("\n[dim]Nothing applied.[/dim]")
+        _log_learn(positives, negatives, proposal, {})
+        return
+
+    # Back up interests.md before any in-place rewrite or deletion.
+    backup = None
+    if apply_rev or apply_rem:
+        backup = _backup_interests(interests_path)
+        console.print(f"[dim]Backed up interests.md → {backup}[/dim]")
+
+    sections = [
+        "Apply exactly the edits below and nothing else. Keep every other "
+        "line — its wording, ordering, and formatting — byte-for-byte identical."
+    ]
+    if apply_add:
+        lines = [f"- [{e.get('section', '')}] {e.get('text', '')}" for e in apply_add]
+        sections.append(
+            "[ADD] Insert each new line under its named section:\n" + "\n".join(lines)
+        )
+    if apply_rev:
+        blocks = [
+            f"- [{e.get('section', '')}]\n  before: {e.get('before', '')}\n"
+            f"  after:  {e.get('after', '')}"
+            for e in apply_rev
+        ]
+        sections.append(
+            "[REVISE] Replace each before-line with its after-line, "
+            "matching the before text exactly:\n" + "\n".join(blocks)
+        )
+    if apply_rem:
+        lines = [f"- [{e.get('section', '')}] {e.get('text', '')}" for e in apply_rem]
+        sections.append(
+            "[REMOVE] Delete each line entirely (and tidy any leftover "
+            "blank line):\n" + "\n".join(lines)
+        )
+
+    apply_prompt = (
+        f"Here is the current contents of interests.md:\n{interests_text}\n\n"
+        + "\n\n".join(sections)
+        + f"\n\nWrite the updated file to {interests_path}."
+    )
+
+    result2: dict = {}
+    t = threading.Thread(
+        target=_run_claude,
+        args=(
+            [
+                "claude",
+                "-p",
+                "--allowedTools",
+                "Write",
+                "--output-format",
+                "json",
+                apply_prompt,
+            ],
+            60,
+            result2,
+        ),
+    )
+    t.start()
+    with console.status("Applying…"):
+        t.join()
+    console.print(
+        f"[green]✓[/green] Applied {len(apply_add)} addition(s), "
+        f"{len(apply_rev)} revision(s), {len(apply_rem)} removal(s)."
+    )
+    if backup:
+        console.print(f"[dim]Restore with: cp {backup} {interests_path}[/dim]")
+
+    _log_learn(
+        positives,
+        negatives,
+        proposal,
+        {
+            "additions": len(apply_add),
+            "revisions": len(apply_rev),
+            "removals": len(apply_rem),
+        },
+        backup=str(backup) if backup else None,
+    )
+
+
+def _log_learn(
+    positives: list[dict],
+    negatives: list[dict],
+    proposal: dict,
+    applied: dict,
+    backup: str | None = None,
+) -> None:
+    entry = {
+        "n_positive": len(positives),
+        "n_negative": len(negatives),
+        "proposed": {
+            "additions": len(proposal.get("additions") or []),
+            "revisions": len(proposal.get("revisions") or []),
+            "removals": len(proposal.get("removals") or []),
+        },
+        "applied": applied,
+        "backup": backup,
+        "timestamp": datetime.now().isoformat(),
+    }
+    with open(LEARN_LOG_PATH, "a") as f:
+        f.write(json.dumps(entry) + "\n")

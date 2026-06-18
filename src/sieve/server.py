@@ -88,6 +88,15 @@ def toggle_reading_list(body: DoiBody):
         return {"status": "error", "detail": str(e)}
 
 
+@app.post("/toggle-negative")
+def toggle_negative(body: DoiBody):
+    try:
+        new_val = db.toggle_negative_example(body.doi)
+        return {"status": "ok", "is_negative": new_val}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
+
 @app.post("/set-note")
 def set_note(body: NoteBody):
     try:

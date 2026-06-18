@@ -61,7 +61,10 @@ replace = 'version = "{new_version}"'
 extend-exclude = ["*.ipynb"]
 
 [tool.ruff.lint]
-select=["E9","F63","F7","F82"]  # Minimal: syntax errors and undefined names
+select = ["E", "F", "I"]  # pycodestyle errors, pyflakes, isort
+# E501 (line length) is left to `ruff format`; the remaining long lines are
+# prompt/SQL/log string literals the formatter intentionally won't break.
+ignore = ["E501"]
 
 [tool.poe.tasks.lab]
 cmd = "uv run --with jupyterlab --with jupyterlab-vim --with jupyterlab-code-formatter --with jupyter-resource-usage --with jupyterlab-execute-time --with catppuccin-jupyterlab --with ipywidgets jupyter lab --no-browser"

@@ -15,6 +15,8 @@ Sieve fetches new papers daily from bioRxiv, arXiv, and journal RSS feeds, score
 
 Papers are scored 1–10. You configure thresholds for what gets stored and what appears in the UI.
 
+The scorer is driven by a natural-language `interests.md` — you explain *why* you care about certain work, not a keyword list. As you use Sieve, **`sieve learn`** turns that usage back into the profile: the papers you add to your reading list ("more like this") and the ones you flag as "less like this" become proposed edits to `interests.md`, so the profile sharpens as your tastes become clear.
+
 ---
 
 ## Requirements
@@ -115,12 +117,13 @@ sieve serve     # open the site in your browser
 |---------|-------------|
 | `sieve run [--site-threshold N]` | Fetch new papers, score, and update the site |
 | `sieve serve` | Start local server and open browser |
-| `sieve seed --doi <DOI> [--pdf PATH]` | Evaluate a paper and optionally update your interests profile |
+| `sieve seed --doi <DOI> [--pdf PATH]` | Bootstrap your interests from a single paper (cold start) |
+| `sieve learn [--recent K] [--older-sample M] [--all]` | Tune `interests.md` from your reading list + "less like this" flags |
 | `sieve cite --doi <DOI> [--forward] [--recommend] [--site-threshold N]` | Score the citation graph of a paper |
 | `sieve clean` | Prune low-score papers outside the fetch window |
 | `sieve export --from FILE [--output PATH] [--title TEXT] [--interests PATH]` | Generate a standalone annotated bibliography HTML |
 
-`--site-threshold N` overrides the `site_threshold` from settings for that run (useful for one-off exploration without changing your config). `--pdf PATH` on `seed` lets you supply a local PDF when the DOI fetch doesn't yield a full abstract.
+`--site-threshold N` overrides the `site_threshold` from settings for that run (useful for one-off exploration without changing your config).
 
 ### Citation graph (`sieve cite`)
 
@@ -146,15 +149,42 @@ sieve cite --doi "https://www.semanticscholar.org/paper/Title/f583cb7b6e6aa669..
 
 > **Note:** Many journal papers are indexed in Semantic Scholar under their preprint DOI. If a journal DOI fails, try the bioRxiv DOI. Sieve falls back to OpenAlex automatically when Semantic Scholar blocks reference access (common for Elsevier papers).
 
-### Seeding your interests (`sieve seed`)
+### Tuning your interests over time
 
-When you read a paper that made you realise your interests profile is missing something, run:
+`interests.md` is the heart of the system, and it's meant to evolve. There are two ways to refine it — one for cold start, one for steady state.
+
+#### Cold start: `sieve seed`
+
+Before you have any reading history, bootstrap the profile one paper at a time. When you read a paper that makes you realise your profile is missing something:
 
 ```bash
 sieve seed --doi 10.1038/s41593-022-01107-4
 ```
 
-Claude evaluates whether the paper represents a gap in your `interests.md` and suggests an addition. You confirm before anything is written.
+Claude evaluates whether the paper represents a gap in your `interests.md` and suggests an addition. You confirm before anything is written. (`--pdf PATH` supplies a local PDF when the DOI fetch doesn't yield a usable abstract.)
+
+#### Steady state: `sieve learn`
+
+Once you've been using Sieve, your behaviour *is* the signal — no need to feed papers in by hand. Two actions in the web UI accumulate in the database:
+
+- **Reading list** — papers you save are treated as **"more like this"**.
+- **Less like this** — the button on each paper records an explicit **negative example** (a false positive you want fewer of). These persist even after the paper is pruned.
+
+Then run:
+
+```bash
+sieve learn
+```
+
+Claude reviews those saved and rejected papers against your current profile and proposes edits in three forms, which you review and confirm **per group**:
+
+- **Add** — new interest lines (liberal, to avoid missing relevant work)
+- **Revise** — rewrite a vague or overly broad line to be sharper, shown as a before→after diff
+- **Remove** — delete a stale or redundant line (conservative — it prefers a revision when in doubt)
+
+Before any revision or removal, `interests.md` is backed up to `data/backups/` and the restore command is printed, so edits are always reversible.
+
+To keep the prompt focused on current interests, `learn` samples your reading list: it always includes the most recent `--recent K` saves (default 50) plus a random `--older-sample M` (default 25) drawn from older ones, so long-standing themes still surface without overweighting whatever was published lately. Use `--all` to consider the entire reading list (e.g. a periodic full rebuild). Explicit "less like this" flags are always included, newest first.
 
 ### Annotated bibliography (`sieve export`)
 
