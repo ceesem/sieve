@@ -335,15 +335,18 @@ def cite(args) -> None:
 
 def seed(args) -> None:
     db.init_db()
-    seed_paper(doi=args.doi, pdf=getattr(args, "pdf", None))
+    settings = load_settings()
+    seed_paper(doi=args.doi, pdf=getattr(args, "pdf", None), settings=settings)
 
 
 def learn(args) -> None:
     db.init_db()
+    settings = load_settings()
     learn_interests(
         min_examples=args.min_examples,
         recent_k=None if args.all else args.recent,
         older_sample=args.older_sample,
+        settings=settings,
     )
 
 
@@ -432,6 +435,7 @@ def export(args) -> None:
     interests_path = Path(args.interests) if args.interests else None
 
     if interests_path:
+        settings = load_settings()
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -440,7 +444,7 @@ def export(args) -> None:
         ) as progress:
             progress.add_task("Annotating with custom interests…", total=None)
             found, missing = build_bibliography(
-                dois, output_path, args.title, interests_path
+                dois, output_path, args.title, interests_path, settings=settings
             )
     else:
         found, missing = build_bibliography(dois, output_path, args.title)

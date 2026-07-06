@@ -1,6 +1,7 @@
 import hashlib
 import json
 import logging
+import os
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
@@ -208,12 +209,14 @@ def _run_claude(
     output_path: Path,
     batch_idx: int,
     stage: str,
+    claude_command: str = "claude",
+    claude_env: dict[str, str] | None = None,
 ) -> list | None:
     """Run claude CLI and return parsed JSON from stdout, or None on failure."""
     try:
         result = subprocess.run(
             [
-                "claude",
+                claude_command,
                 "-p",
                 "--model",
                 model,
@@ -228,6 +231,7 @@ def _run_claude(
             capture_output=True,
             text=True,
             timeout=600,
+            env={**os.environ, **(claude_env or {})},
         )
 
         parsed = _parse_stdout_result(result.stdout, batch_idx, stage)
@@ -339,11 +343,13 @@ def score_papers(
                 scored_path.unlink()
         prompt = _build_haiku_prompt(interests_text, batch_data_list[i])
         result = _run_claude(
-            "claude-haiku-4-5-20251001",
+            settings.haiku_model,
             prompt,
             scored_path,
             i,
             "haiku",
+            claude_command=settings.claude_command,
+            claude_env=settings.claude_env,
         )
         if result is not None:
             logger.info(f"Batch {i}: Haiku scored {len(result)} papers")
@@ -411,11 +417,13 @@ def score_papers(
         input_path.write_text(json.dumps(chunk, indent=2))
         prompt = _build_sonnet_prompt(interests_text, chunk, negatives_block)
         result = _run_claude(
-            "claude-sonnet-4-6",
+            settings.sonnet_model,
             prompt,
             output_path,
             si,
             "sonnet",
+            claude_command=settings.claude_command,
+            claude_env=settings.claude_env,
         )
         if result is not None:
             logger.info(f"Sonnet batch {si}: wrote reasons for {len(result)} papers")
@@ -490,6 +498,9 @@ def annotate_papers(
     papers: list[dict],
     interests_text: str,
     batch_size: int = 15,
+    claude_command: str = "claude",
+    claude_env: dict[str, str] | None = None,
+    model: str = "sonnet",
 ) -> dict[str, dict]:
     """Run a Sonnet-only annotation pass with a custom interests profile.
 
@@ -519,7 +530,13 @@ def annotate_papers(
         def _run(si: int) -> list | None:
             prompt = _build_sonnet_prompt(interests_text, batches[si])
             return _run_claude(
-                "claude-sonnet-4-6", prompt, tmp / f"out_{si}.json", si, "sonnet"
+                model,
+                prompt,
+                tmp / f"out_{si}.json",
+                si,
+                "sonnet",
+                claude_command=claude_command,
+                claude_env=claude_env,
             )
 
         with ThreadPoolExecutor(max_workers=4) as ex:

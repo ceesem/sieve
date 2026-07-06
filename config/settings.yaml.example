@@ -7,6 +7,27 @@ site_threshold: 4
 batch_size: 30
 sonnet_batch_size: 40
 
+# CLI binary invoked as `<claude_command> -p ...` for scoring/seed/learn.
+# Override if you use a renamed/wrapper Claude Code CLI executable. Note:
+# shell aliases (~/.zshrc etc.) do NOT work here — sieve invokes this
+# directly, not through a shell, so aliases are never expanded. If your
+# "alias" is really `SOME_VAR=... claude`, use claude_env below instead.
+claude_command: claude
+
+# Extra environment variables merged into the claude_command subprocess.
+# Useful for separate personal/work Claude Code configs/accounts, e.g.
+# an alias like `alias cc-mine="CLAUDE_CONFIG_DIR=$HOME/.claude-mine claude"`
+# becomes:
+# claude_env:
+#   CLAUDE_CONFIG_DIR: /Users/you/.claude-mine
+claude_env: {}
+
+# Model aliases resolve to the latest snapshot for that tier, so you get
+# minor version updates automatically. Pin an exact model ID (e.g.
+# "claude-sonnet-4-6") instead if you need to lock a specific version.
+haiku_model: haiku
+sonnet_model: sonnet
+
 biorxiv_category: neuroscience
 
 arxiv_categories:

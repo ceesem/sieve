@@ -224,6 +224,19 @@ Scoring uses a two-stage Claude pipeline: Haiku for fast triage, then Sonnet for
 | `batch_size` | 30 | Papers per Haiku triage batch |
 | `sonnet_batch_size` | 40 | Papers per Sonnet scoring batch |
 | `max_papers_per_source` | 500 | Max papers fetched per source per run |
+| `claude_command` | `claude` | CLI binary to invoke; override for a renamed/wrapper Claude Code CLI executable |
+| `claude_env` | `{}` | Extra env vars merged into the `claude_command` subprocess (e.g. `CLAUDE_CONFIG_DIR` for a separate personal/work account) |
+| `haiku_model` | `haiku` | Model alias/ID for triage scoring |
+| `sonnet_model` | `sonnet` | Model alias/ID for precision scoring, seed, and learn |
+
+`haiku_model`/`sonnet_model` accept either a bare tier alias (`haiku`, `sonnet`) — which always resolves to that tier's latest model snapshot — or a pinned model ID (e.g. `claude-sonnet-4-6`) if you need to lock an exact version.
+
+`claude_command` runs as a direct subprocess call, not through a shell — shell aliases from `.zshrc`/`.bashrc` are never expanded. If your alias sets an environment variable (e.g. `alias cc-mine="CLAUDE_CONFIG_DIR=$HOME/.claude-mine claude"`), use `claude_env` instead:
+
+```yaml
+claude_env:
+  CLAUDE_CONFIG_DIR: /Users/you/.claude-mine
+```
 
 ---
 

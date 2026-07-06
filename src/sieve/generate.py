@@ -47,6 +47,7 @@ def build_bibliography(
     output_path: Path,
     title: str = "Annotated Bibliography",
     interests_path: Path | None = None,
+    settings: Settings | None = None,
 ) -> tuple[int, list[str]]:
     """Render a standalone annotated-bibliography HTML from a list of DOIs.
 
@@ -68,7 +69,16 @@ def build_bibliography(
 
     if interests_path and papers:
         interests_text = Path(interests_path).read_text()
-        annotations = _score.annotate_papers(papers, interests_text)
+        claude_command = settings.claude_command if settings else "claude"
+        claude_env = settings.claude_env if settings else {}
+        sonnet_model = settings.sonnet_model if settings else "sonnet"
+        annotations = _score.annotate_papers(
+            papers,
+            interests_text,
+            claude_command=claude_command,
+            claude_env=claude_env,
+            model=sonnet_model,
+        )
         for p in papers:
             ann = annotations.get(p["doi"])
             if ann:

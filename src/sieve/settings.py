@@ -27,6 +27,10 @@ class Settings:
     feeds: list[FeedConfig] = field(default_factory=list)
     max_papers_per_source: int = 200
     mailto: str = ""
+    claude_command: str = "claude"
+    claude_env: dict[str, str] = field(default_factory=dict)
+    haiku_model: str = "haiku"
+    sonnet_model: str = "sonnet"
 
 
 def load_settings(path: str | pathlib.Path | None = None) -> Settings:

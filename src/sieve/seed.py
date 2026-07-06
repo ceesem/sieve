@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -12,7 +13,7 @@ from rich.padding import Padding
 from rich.panel import Panel
 
 from . import db
-from .settings import PROJECT_ROOT
+from .settings import PROJECT_ROOT, Settings
 
 logger = logging.getLogger(__name__)
 
@@ -113,8 +114,16 @@ def _parse_stdout_object(stdout: str) -> dict | None:
     return None
 
 
-def _run_claude(cmd: list[str], timeout: int, result: dict) -> None:
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+def _run_claude(
+    cmd: list[str], timeout: int, result: dict, env: dict[str, str] | None = None
+) -> None:
+    proc = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+        env={**os.environ, **(env or {})},
+    )
     result["stdout"] = proc.stdout
     result["returncode"] = proc.returncode
 
@@ -135,8 +144,12 @@ def _ask(prompt: str) -> str:
 
 
 def seed(
-    doi: str | None = None, pdf: str | None = None, downgrade: bool = False
+    doi: str | None = None,
+    pdf: str | None = None,
+    downgrade: bool = False,
+    settings: Settings | None = None,
 ) -> None:
+    settings = settings or Settings()
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
     STAGING_DIR.mkdir(parents=True, exist_ok=True)
@@ -229,8 +242,10 @@ Output only valid JSON. No preamble, no markdown fences.
         target=_run_claude,
         args=(
             [
-                "claude",
+                settings.claude_command,
                 "-p",
+                "--model",
+                settings.sonnet_model,
                 "--tools",
                 "",
                 "--permission-mode",
@@ -241,6 +256,7 @@ Output only valid JSON. No preamble, no markdown fences.
             ],
             120,
             result,
+            settings.claude_env,
         ),
     )
     t.start()
@@ -312,8 +328,10 @@ Write the updated file to {interests_path}."""
                 target=_run_claude,
                 args=(
                     [
-                        "claude",
+                        settings.claude_command,
                         "-p",
+                        "--model",
+                        settings.sonnet_model,
                         "--allowedTools",
                         "Write",
                         "--output-format",
@@ -322,6 +340,7 @@ Write the updated file to {interests_path}."""
                     ],
                     60,
                     result2,
+                    settings.claude_env,
                 ),
             )
             t.start()
@@ -481,13 +500,17 @@ def _backup_interests(interests_path):
 
 
 def learn(
-    min_examples: int = 3, recent_k: int | None = 50, older_sample: int = 25
+    min_examples: int = 3,
+    recent_k: int | None = 50,
+    older_sample: int = 25,
+    settings: Settings | None = None,
 ) -> None:
     """Propose interests.md edits from accumulated reading-list / negative signals.
 
     recent_k / older_sample tune the graded recency sample of reading-list
     positives (see db.get_positive_examples); recent_k=None uses every saved paper.
     """
+    settings = settings or Settings()
     logging.getLogger("httpx").setLevel(logging.WARNING)
     LEARN_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
 
@@ -516,10 +539,10 @@ def learn(
         target=_run_claude,
         args=(
             [
-                "claude",
+                settings.claude_command,
                 "-p",
                 "--model",
-                "claude-sonnet-4-6",
+                settings.sonnet_model,
                 "--tools",
                 "",
                 "--permission-mode",
@@ -530,6 +553,7 @@ def learn(
             ],
             300,
             result,
+            settings.claude_env,
         ),
     )
     t.start()
@@ -629,8 +653,10 @@ def learn(
         target=_run_claude,
         args=(
             [
-                "claude",
+                settings.claude_command,
                 "-p",
+                "--model",
+                settings.sonnet_model,
                 "--allowedTools",
                 "Write",
                 "--output-format",
@@ -639,6 +665,7 @@ def learn(
             ],
             60,
             result2,
+            settings.claude_env,
         ),
     )
     t.start()
