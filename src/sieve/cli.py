@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import subprocess
 import sys
 import threading
@@ -16,14 +17,39 @@ from .ingest import ingest_batch
 from .score import ClaudeAuthError, score_papers
 from .seed import learn as learn_interests
 from .seed import seed as seed_paper
-from .settings import load_settings
+from .settings import PROJECT_ROOT, load_settings
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
+LOG_PATH = PROJECT_ROOT / "data" / "logs" / "sieve.log"
+_LOG_FORMAT = logging.Formatter(
+    "%(asctime)s %(levelname)s %(message)s", datefmt="%Y-%m-%d %H:%M:%S"
 )
+# Terminal output; quieted to WARNING while rich progress bars are showing.
+_console_handler = logging.StreamHandler()
+_console_handler.setFormatter(_LOG_FORMAT)
+
 logger = logging.getLogger(__name__)
+
+
+def _setup_logging() -> None:
+    """Log to the terminal and, at INFO, to data/logs/sieve.log for every
+    invocation, so manual and scheduled runs leave the same record."""
+    from logging.handlers import RotatingFileHandler
+
+    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    file_handler = RotatingFileHandler(
+        LOG_PATH, maxBytes=5_000_000, backupCount=3, encoding="utf-8"
+    )
+    file_handler.setFormatter(_LOG_FORMAT)
+    root = logging.getLogger()
+    root.setLevel(logging.INFO)
+    root.addHandler(_console_handler)
+    root.addHandler(file_handler)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+
+
+def _quiet_console() -> None:
+    """Keep INFO chatter off the terminal (it still goes to sieve.log)."""
+    _console_handler.setLevel(logging.WARNING)
 
 
 def _print_help():
@@ -132,8 +158,6 @@ def _score_ingest_build(papers, settings, progress, console):
 
 
 def run(args=None) -> None:
-    import logging as _logging
-
     from rich.console import Console
     from rich.progress import (
         BarColumn,
@@ -148,9 +172,7 @@ def run(args=None) -> None:
     if args is not None and args.site_threshold is not None:
         settings.site_threshold = args.site_threshold
     db.init_db()
-
-    _logging.getLogger("sieve").setLevel(_logging.WARNING)
-    _logging.getLogger("httpx").setLevel(_logging.WARNING)
+    _quiet_console()
 
     console = Console()
     progress = Progress(
@@ -199,6 +221,10 @@ def run(args=None) -> None:
     console.print(
         f"\nProcessed [bold]{total_inserted}[/bold] papers · "
         f"[bold cyan]{total_high}[/bold cyan] above threshold (≥{settings.display_threshold})"
+    )
+    logger.info(
+        f"Run complete: {len(papers)} fetched, {total_inserted} ingested, "
+        f"{total_high} scored ≥{settings.display_threshold}"
     )
 
 
@@ -310,8 +336,6 @@ def clean(args=None) -> None:
 
 
 def cite(args) -> None:
-    import logging as _logging
-
     from rich.console import Console
     from rich.progress import (
         BarColumn,
@@ -326,9 +350,7 @@ def cite(args) -> None:
     if args.site_threshold is not None:
         settings.site_threshold = args.site_threshold
     db.init_db()
-
-    _logging.getLogger("sieve").setLevel(_logging.WARNING)
-    _logging.getLogger("httpx").setLevel(_logging.WARNING)
+    _quiet_console()
 
     console = Console()
     progress = Progress(
@@ -616,6 +638,14 @@ def main() -> None:
     )
 
     args = parser.parse_args()
+    _setup_logging()
+    if args.command:
+        trigger = (
+            "scheduled"
+            if os.environ.get("XPC_SERVICE_NAME", "").startswith("com.sieve")
+            else "manual"
+        )
+        logger.info(f"=== sieve {args.command} ({trigger}) ===")
 
     if args.command is None or args.help:
         _print_help()

@@ -251,6 +251,21 @@ def _envelope_error(stdout: str) -> str | None:
     return None
 
 
+def _log_call_stats(stdout: str, batch_idx: int, stage: str) -> None:
+    """Log which model actually answered (aliases like "haiku" float to the
+    newest release), plus API time and cost, from the CLI's JSON envelope."""
+    try:
+        env = json.loads(stdout.strip())
+        models = ", ".join(env.get("modelUsage") or {}) or "unknown model"
+        logger.info(
+            f"Batch {batch_idx} ({stage}): {models}, "
+            f"{env.get('duration_api_ms', 0) / 1000:.1f}s API, "
+            f"${env.get('total_cost_usd', 0):.4f}"
+        )
+    except (json.JSONDecodeError, AttributeError, TypeError):
+        pass
+
+
 def _run_claude(
     model: str,
     prompt: str,
@@ -300,6 +315,7 @@ def _run_claude(
 
         parsed = _parse_stdout_result(result.stdout, batch_idx, stage)
         if parsed is not None:
+            _log_call_stats(result.stdout, batch_idx, stage)
             output_path.write_text(json.dumps(parsed))
             return parsed
 
