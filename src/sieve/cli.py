@@ -28,6 +28,9 @@ _console_handler = logging.StreamHandler()
 _console_handler.setFormatter(_LOG_FORMAT)
 
 logger = logging.getLogger(__name__)
+# File-only logger for run markers, so they don't clutter the terminal.
+_file_logger = logging.getLogger("sieve.logfile")
+_file_logger.propagate = False
 
 
 def _setup_logging() -> None:
@@ -44,6 +47,8 @@ def _setup_logging() -> None:
     root.setLevel(logging.INFO)
     root.addHandler(_console_handler)
     root.addHandler(file_handler)
+    _file_logger.addHandler(file_handler)
+    _file_logger.setLevel(logging.INFO)
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
 
@@ -93,6 +98,7 @@ def _print_help():
         "--doi DOI [--forward] [--recommend]",
     )
     table.add_row("clean", "Prune low-score papers outside the fetch window", "")
+    table.add_row("health", "Show per-source fetch health and open issues", "")
     table.add_row(
         "export",
         "Generate a standalone annotated bibliography",
@@ -107,8 +113,11 @@ def _print_help():
     console.print()
 
 
-def _score_ingest_build(papers, settings, progress, console):
-    """Shared score → ingest → build-site pipeline with rich progress tasks."""
+def _score_ingest_build(papers, settings, progress, console, stats=None, build=True):
+    """Shared score → ingest → build-site pipeline with rich progress tasks.
+
+    `stats` is passed through to score_papers (failed batches, models used).
+    """
     n_haiku = (len(papers) + settings.batch_size - 1) // settings.batch_size
     haiku_task = progress.add_task("Haiku triage…", total=n_haiku)
     sonnet_task = progress.add_task("Sonnet scoring…", total=None, visible=False)
@@ -134,6 +143,7 @@ def _score_ingest_build(papers, settings, progress, console):
             haiku_callback=_on_haiku,
             sonnet_callback=_on_sonnet,
             sonnet_start_callback=_on_sonnet_start,
+            stats=stats,
         ):
             total_inserted += ingest_batch(batch_papers, batch_scores, run_timestamp)
             scored_dois.update(batch_scores)
@@ -150,11 +160,63 @@ def _score_ingest_build(papers, settings, progress, console):
         sonnet_task, description="[green]✓[/green] Sonnet scoring", visible=True
     )
 
-    site_task = progress.add_task("Building site…", total=1)
-    build_site(settings)
-    progress.update(site_task, completed=1, description="[green]✓[/green] Site built")
+    if build:
+        site_task = progress.add_task("Building site…", total=1)
+        build_site(settings)
+        progress.update(
+            site_task, completed=1, description="[green]✓[/green] Site built"
+        )
 
     return total_inserted, total_high
+
+
+def _trigger() -> str:
+    """ "scheduled" when launched by the com.sieve.* launchd job."""
+    return (
+        "scheduled"
+        if os.environ.get("XPC_SERVICE_NAME", "").startswith("com.sieve")
+        else "manual"
+    )
+
+
+def _finish_run(run_info: dict, report: dict, settings, console) -> None:
+    """Record the run, report health, notify on new problems, rebuild the site."""
+    from rich.text import Text
+
+    from .health import compute_health
+
+    try:
+        db.record_run(run_info, report)
+        health = compute_health(settings)
+        run_info["issues"] = [i.key for i in health.problems]
+        db.record_run(run_info, report)
+
+        runs = db.get_runs(limit=2)
+        previous = set(runs[1]["issues"]) if len(runs) > 1 else set()
+        new = [i for i in health.problems if i.key not in previous and i.notify]
+
+        logger.info(f"Health: {health.summary()}")
+        for issue in health.issues:
+            logger.log(
+                logging.INFO if issue.severity == "info" else logging.WARNING,
+                f"Health {issue.severity}: {issue.message}",
+            )
+
+        style = {"ok": "green", "info": "dim", "warn": "yellow", "error": "red"}
+        console.print(Text(f"\nHealth: {health.summary()}", style=style[health.level]))
+        for issue in health.issues:
+            marker = "  new " if issue in new else "      "
+            console.print(Text(marker + issue.message, style=style[issue.severity]))
+        if health.problems:
+            console.print("[dim]  Details: sieve health[/dim]")
+
+        if new:
+            more = f" (+{len(new) - 1} more)" if len(new) > 1 else ""
+            _notify("sieve: source health", new[0].message + more)
+    except Exception as e:  # health reporting must never break a run
+        logger.error(f"Health check failed: {e}")
+
+    build_site(settings)
 
 
 def run(args=None) -> None:
@@ -184,48 +246,126 @@ def run(args=None) -> None:
         console=console,
     )
 
-    if not _wait_for_network(console):
-        console.print("[red]No network — skipping this run.[/red]")
-        sys.exit(1)
+    run_info = {
+        "run_at": datetime.now().isoformat(timespec="seconds"),
+        "trigger": _trigger(),
+        "fetched": 0,
+        "ingested": 0,
+        "failed_batches": 0,
+        "models": set(),
+        "error": None,
+    }
+    report: dict = {}
+    stats: dict = {}
+    total_inserted = total_high = 0
 
-    with progress:
-        fetch_task = progress.add_task("Fetching papers…", total=None)
-        try:
-            papers = fetch_all(settings)
-        except (KeyboardInterrupt, Exception) as exc:
-            progress.stop()
-            if isinstance(exc, KeyboardInterrupt):
-                console.print("[yellow]Interrupted.[/yellow]")
-            else:
-                console.print(f"[red]Fetch failed:[/red] {exc}")
-            return
-        progress.update(
-            fetch_task,
-            total=1,
-            completed=1,
-            description=f"[green]✓[/green] Fetched {len(papers)} new papers",
-        )
+    try:
+        if not _wait_for_network(console):
+            run_info["error"] = "no network"
+            console.print("[red]No network — skipping this run.[/red]")
+            sys.exit(1)
 
-        if not papers:
-            site_task = progress.add_task("Rebuilding site…", total=1)
-            build_site(settings)
+        with progress:
+            fetch_task = progress.add_task("Fetching papers…", total=None)
+            try:
+                papers = fetch_all(settings, report)
+            except (KeyboardInterrupt, Exception) as exc:
+                progress.stop()
+                if isinstance(exc, KeyboardInterrupt):
+                    run_info["error"] = "interrupted"
+                    console.print("[yellow]Interrupted.[/yellow]")
+                else:
+                    run_info["error"] = f"fetch failed: {exc}"
+                    console.print(f"[red]Fetch failed:[/red] {exc}")
+                return
+            run_info["fetched"] = len(papers)
             progress.update(
-                site_task, completed=1, description="[green]✓[/green] Site rebuilt"
+                fetch_task,
+                total=1,
+                completed=1,
+                description=f"[green]✓[/green] Fetched {len(papers)} new papers",
             )
-            return
 
-        total_inserted, total_high = _score_ingest_build(
-            papers, settings, progress, console
+            if papers:
+                total_inserted, total_high = _score_ingest_build(
+                    papers, settings, progress, console, stats=stats, build=False
+                )
+                run_info["ingested"] = total_inserted
+    except ClaudeAuthError as e:
+        run_info["error"] = f"Claude CLI not authenticated: {e}"
+        raise
+    finally:
+        run_info["failed_batches"] = stats.get("failed_batches", 0)
+        run_info["models"] = stats.get("models", set())
+        if run_info["error"] is None:
+            console.print(
+                f"\nProcessed [bold]{total_inserted}[/bold] papers · "
+                f"[bold cyan]{total_high}[/bold cyan] above threshold (≥{settings.display_threshold})"
+            )
+            logger.info(
+                f"Run complete: {run_info['fetched']} fetched, {total_inserted} ingested, "
+                f"{total_high} scored ≥{settings.display_threshold}"
+            )
+        _finish_run(run_info, report, settings, console)
+
+
+def health(args=None) -> None:
+    """Print per-source health and any open issues."""
+    from rich.console import Console
+    from rich.table import Table
+
+    from .health import compute_health
+
+    settings = load_settings()
+    db.init_db()
+    h = compute_health(settings)
+    console = Console()
+
+    colour = {"ok": "green", "warn": "yellow", "error": "red", "unknown": "dim"}
+    table = Table(box=None, pad_edge=False, header_style="bold")
+    for col in (
+        "Source",
+        "Status",
+        "Entries",
+        "New 7d",
+        "Last new",
+        "Usual gap",
+        "Abstracts 7d",
+    ):
+        table.add_column(
+            col,
+            justify="left" if col in ("Source", "Status", "Last new") else "right",
+            no_wrap=col == "Source",
         )
+    for sh in h.sources:
+        table.add_row(
+            sh.name,
+            f"[{colour[sh.status]}]{sh.status}[/]",
+            "–" if sh.last_entries is None else str(sh.last_entries),
+            str(sh.new_7d),
+            str(sh.last_new or "–"),
+            "–" if sh.typical_gap is None else f"{sh.typical_gap:.0f}d",
+            "–" if sh.abstract_pct is None else f"{sh.abstract_pct:.0%}",
+        )
+    console.print()
+    console.print(table)
+    console.print()
 
-    console.print(
-        f"\nProcessed [bold]{total_inserted}[/bold] papers · "
-        f"[bold cyan]{total_high}[/bold cyan] above threshold (≥{settings.display_threshold})"
-    )
-    logger.info(
-        f"Run complete: {len(papers)} fetched, {total_inserted} ingested, "
-        f"{total_high} scored ≥{settings.display_threshold}"
-    )
+    if h.last_run:
+        r = h.last_run
+        models = ", ".join(r["models"]) or "–"
+        console.print(
+            f"[bold]Last run[/bold] {r['run_at']} ({r['trigger']}): "
+            f"{r['fetched']} fetched, {r['ingested']} ingested, "
+            f"{r['failed_batches']} failed batches · models: {models}"
+        )
+    style = {"error": "red", "warn": "yellow", "info": "dim"}
+    console.print(f"[bold]{h.summary()}[/bold]")
+    for issue in h.issues:
+        console.print(
+            f"  [{style[issue.severity]}]{issue.severity:5}[/] {issue.message}"
+        )
+    console.print()
 
 
 def _notify(title: str, message: str) -> None:
@@ -600,6 +740,7 @@ def main() -> None:
 
     # clean
     subparsers.add_parser("clean", help="Prune low-score papers outside fetch window")
+    subparsers.add_parser("health", help="Show source and pipeline health")
 
     # export
     p_export = subparsers.add_parser(
@@ -640,12 +781,7 @@ def main() -> None:
     args = parser.parse_args()
     _setup_logging()
     if args.command:
-        trigger = (
-            "scheduled"
-            if os.environ.get("XPC_SERVICE_NAME", "").startswith("com.sieve")
-            else "manual"
-        )
-        logger.info(f"=== sieve {args.command} ({trigger}) ===")
+        _file_logger.info(f"=== sieve {args.command} ({_trigger()}) ===")
 
     if args.command is None or args.help:
         _print_help()
@@ -658,6 +794,7 @@ def main() -> None:
         "learn": learn,
         "cite": cite,
         "clean": clean,
+        "health": health,
         "export": export,
     }
     try:
@@ -668,7 +805,9 @@ def main() -> None:
         msg = f"Claude CLI is not authenticated ({e}). Fetched papers are queued for the next run."
         Console().print(f"\n[red]{msg}[/red]")
         logger.error(msg)
-        _notify(
-            "sieve: Claude login needed", "Run `claude` and /login, then `sieve run`."
-        )
+        if args.command != "run":  # run reports this through its health check
+            _notify(
+                "sieve: Claude login needed",
+                "Run `claude` and /login, then `sieve run`.",
+            )
         sys.exit(1)

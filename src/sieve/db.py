@@ -45,6 +45,29 @@ CREATE TABLE IF NOT EXISTS negative_examples (
     match_basis     TEXT,
     flagged_at      TEXT
 );
+
+-- Health history: what each source returned on each `sieve run`, and how the
+-- run as a whole went. Read by health.py to spot silently broken sources.
+CREATE TABLE IF NOT EXISTS source_runs (
+    run_at          TEXT NOT NULL,
+    source          TEXT NOT NULL,
+    entries         INTEGER,
+    new             INTEGER,
+    full_abstract   INTEGER,
+    error           TEXT,
+    PRIMARY KEY (run_at, source)
+);
+
+CREATE TABLE IF NOT EXISTS runs (
+    run_at          TEXT PRIMARY KEY,
+    trigger         TEXT,
+    fetched         INTEGER,
+    ingested        INTEGER,
+    failed_batches  INTEGER,
+    models          TEXT,
+    error           TEXT,
+    issues          TEXT
+);
 """
 
 
@@ -332,3 +355,82 @@ def get_summary(
         "high_score": high_score,
         "last_fetched": last_fetched,
     }
+
+
+def record_run(run: dict, sources: dict[str, dict]) -> None:
+    """Store one `sieve run` and its per-source fetch results."""
+    with _connect() as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO runs
+               (run_at, trigger, fetched, ingested, failed_batches, models, error, issues)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                run["run_at"],
+                run.get("trigger"),
+                run.get("fetched"),
+                run.get("ingested"),
+                run.get("failed_batches"),
+                json.dumps(sorted(run.get("models") or [])),
+                run.get("error"),
+                json.dumps(run.get("issues") or []),
+            ),
+        )
+        conn.executemany(
+            """INSERT OR REPLACE INTO source_runs
+               (run_at, source, entries, new, full_abstract, error)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            [
+                (
+                    run["run_at"],
+                    name,
+                    r.get("entries"),
+                    r.get("new"),
+                    r.get("full_abstract"),
+                    r.get("error"),
+                )
+                for name, r in sources.items()
+            ],
+        )
+
+
+def get_runs(limit: int = 30) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM runs ORDER BY run_at DESC LIMIT ?", (limit,)
+        ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["models"] = json.loads(d["models"] or "[]")
+        d["issues"] = json.loads(d["issues"] or "[]")
+        out.append(d)
+    return out
+
+
+def get_source_runs(days: int = 90) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            """SELECT * FROM source_runs
+               WHERE run_at >= datetime('now', 'localtime', ?)
+               ORDER BY run_at""",
+            (f"-{days} days",),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_journal_activity(days: int = 90, full_len: int = 400) -> list[dict]:
+    """Per journal per fetch day: papers kept and how many had a full abstract.
+
+    Backfills source health from papers ingested before health tracking
+    existed. Low-score papers are pruned, so this undercounts volume.
+    """
+    with _connect() as conn:
+        rows = conn.execute(
+            """SELECT journal, substr(fetched_at, 1, 10) AS day, count(*) AS n,
+                      sum(length(coalesce(abstract, '')) >= ?) AS full_abstract
+               FROM papers
+               WHERE source != 'cite' AND fetched_at >= date('now', 'localtime', ?)
+               GROUP BY journal, day""",
+            (full_len, f"-{days} days"),
+        ).fetchall()
+    return [dict(r) for r in rows]

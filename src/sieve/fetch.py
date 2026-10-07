@@ -53,6 +53,14 @@ _AFFILIATION_KEYWORDS = re.compile(
 )
 
 
+def _report(report: dict | None, source: str, entries: int, error: str | None = None):
+    """Record one source's fetch outcome for the health check."""
+    if report is not None:
+        if error:  # httpx errors span several lines; keep the first
+            error = error.strip().splitlines()[0][:200]
+        report[source] = {"entries": entries, "error": error}
+
+
 def _split_concatenated_authors(raw: str) -> list[str]:
     """Handle feeds (e.g. PNAS) that concatenate authors+affiliations into one string.
 
@@ -75,12 +83,13 @@ def _split_concatenated_authors(raw: str) -> list[str]:
     return [n for n in names if n]
 
 
-def fetch_biorxiv(settings: Settings) -> list[dict]:
+def fetch_biorxiv(settings: Settings, report: dict | None = None) -> list[dict]:
     end = date.today()
     start = end - timedelta(days=settings.lookback_days)
     papers = []
     cursor = 0
     client = httpx.Client(timeout=30)
+    error = None
 
     while len(papers) < settings.max_papers_per_source:
         url = f"https://api.biorxiv.org/details/biorxiv/{start}/{end}/{cursor}/json"
@@ -90,6 +99,8 @@ def fetch_biorxiv(settings: Settings) -> list[dict]:
             data = resp.json()
         except Exception as e:
             logger.error(f"bioRxiv fetch error at cursor {cursor}: {e}")
+            if cursor == 0:
+                error = str(e)
             break
 
         collection = data.get("collection", [])
@@ -115,6 +126,7 @@ def fetch_biorxiv(settings: Settings) -> list[dict]:
                     "journal": "bioRxiv",
                     "published_date": item.get("date"),
                     "source": "biorxiv",
+                    "feed": "bioRxiv",
                     "url": f"https://doi.org/{doi}",
                 }
             )
@@ -127,10 +139,11 @@ def fetch_biorxiv(settings: Settings) -> list[dict]:
 
     client.close()
     logger.info(f"bioRxiv: fetched {len(papers)} papers")
+    _report(report, "bioRxiv", len(papers), error)
     return papers[: settings.max_papers_per_source]
 
 
-def _fetch_arxiv_category(cat: str) -> list[dict]:
+def _fetch_arxiv_category(cat: str, report: dict | None = None) -> list[dict]:
     """Fetch and parse a single arXiv RSS category. Returns list of papers."""
     url = f"https://rss.arxiv.org/rss/{cat}"
     try:
@@ -139,6 +152,7 @@ def _fetch_arxiv_category(cat: str) -> list[dict]:
         feed = feedparser.parse(resp.text)
     except Exception as e:
         logger.error(f"arXiv RSS error for {cat}: {e}")
+        _report(report, f"arXiv {cat}", 0, str(e))
         return []
 
     papers = []
@@ -171,19 +185,21 @@ def _fetch_arxiv_category(cat: str) -> list[dict]:
                 "journal": "arXiv",
                 "published_date": date.today().isoformat(),
                 "source": "arxiv",
+                "feed": f"arXiv {cat}",
                 "url": f"https://arxiv.org/abs/{arxiv_id}",
             }
         )
+    _report(report, f"arXiv {cat}", len(papers))
     return papers
 
 
-def fetch_arxiv(settings: Settings) -> list[dict]:
+def fetch_arxiv(settings: Settings, report: dict | None = None) -> list[dict]:
     papers: list[dict] = []
     with ThreadPoolExecutor(
         max_workers=len(settings.arxiv_categories) or 1
     ) as executor:
         futures = {
-            executor.submit(_fetch_arxiv_category, cat): cat
+            executor.submit(_fetch_arxiv_category, cat, report): cat
             for cat in settings.arxiv_categories
         }
         for future in as_completed(futures):
@@ -193,17 +209,18 @@ def fetch_arxiv(settings: Settings) -> list[dict]:
 
 
 def _fetch_single_feed(
-    feed_conf, client: httpx.Client, settings: Settings
+    feed_conf, client: httpx.Client, settings: Settings, report: dict | None = None
 ) -> list[dict]:
     """Fetch and parse a single RSS feed. Returns list of papers."""
     if feed_conf.issn:
-        return _fetch_crossref_journal(feed_conf, settings, client)
+        return _fetch_crossref_journal(feed_conf, settings, client, report)
     try:
         resp = _retry(client.get)(feed_conf.url)
         resp.raise_for_status()
         feed = feedparser.parse(resp.text)
     except Exception as e:
         logger.error(f"Feed error for {feed_conf.name}: {e}")
+        _report(report, feed_conf.name, 0, str(e))
         return []
     # feedparser never raises: a bot-challenge HTML page parses as an empty
     # feed. Surface it instead of silently reporting "0 entries".
@@ -212,6 +229,7 @@ def _fetch_single_feed(
             f"Feed error for {feed_conf.name}: got HTML instead of RSS "
             f"(likely bot protection) from {feed_conf.url}"
         )
+        _report(report, feed_conf.name, 0, "got HTML instead of RSS (bot protection?)")
         return []
 
     feed_papers = []
@@ -255,6 +273,7 @@ def _fetch_single_feed(
                 "journal": feed_conf.name,
                 "published_date": date.today().isoformat(),
                 "source": "feed",
+                "feed": feed_conf.name,
                 "url": entry.get("link", f"https://doi.org/{doi}"),
             }
         )
@@ -265,11 +284,12 @@ def _fetch_single_feed(
         f"{len(feed_papers)} with DOI ({no_doi} no DOI), "
         f"{has_abstract} with abstract"
     )
+    _report(report, feed_conf.name, len(feed_papers))
     return feed_papers
 
 
 def _fetch_crossref_journal(
-    feed_conf, settings: Settings, client: httpx.Client
+    feed_conf, settings: Settings, client: httpx.Client, report: dict | None = None
 ) -> list[dict]:
     """Fetch recent articles for a journal by ISSN from the CrossRef API.
 
@@ -295,6 +315,7 @@ def _fetch_crossref_journal(
         items = resp.json().get("message", {}).get("items", [])
     except Exception as e:
         logger.error(f"CrossRef error for {feed_conf.name}: {e}")
+        _report(report, feed_conf.name, 0, str(e))
         return []
 
     papers = []
@@ -317,19 +338,21 @@ def _fetch_crossref_journal(
                 "journal": feed_conf.name,
                 "published_date": date.today().isoformat(),
                 "source": "feed",
+                "feed": feed_conf.name,
                 "url": item.get("URL") or f"https://doi.org/{doi}",
             }
         )
     logger.info(f"  {feed_conf.name}: {len(papers)} recent articles via CrossRef")
+    _report(report, feed_conf.name, len(papers))
     return papers
 
 
-def fetch_feeds(settings: Settings) -> list[dict]:
+def fetch_feeds(settings: Settings, report: dict | None = None) -> list[dict]:
     papers: list[dict] = []
     client = httpx.Client(timeout=30, follow_redirects=True, headers=BROWSER_HEADERS)
     with ThreadPoolExecutor(max_workers=8) as executor:
         futures = {
-            executor.submit(_fetch_single_feed, fc, client, settings): fc
+            executor.submit(_fetch_single_feed, fc, client, settings, report): fc
             for fc in settings.feeds
         }
         for future in as_completed(futures):
@@ -470,19 +493,26 @@ def save_pending(papers: list[dict]) -> None:
         PENDING_PATH.unlink(missing_ok=True)
 
 
-def fetch_all(settings: Settings) -> list[dict]:
-    existing_dois = get_existing_dois()
+def fetch_all(settings: Settings, report: dict | None = None) -> list[dict]:
+    """Fetch new papers from every source.
 
-    # Run all three sources in parallel; enrich feed abstracts after feeds complete.
+    If `report` is given, it is filled with per-source health stats:
+    {source: {entries, error, new, full_abstract}}.
+    """
+    existing_dois = get_existing_dois()
+    report = {} if report is None else report
+
+    # Run all three sources in parallel.
     with ThreadPoolExecutor(max_workers=3) as executor:
-        f_biorxiv = executor.submit(fetch_biorxiv, settings)
-        f_arxiv = executor.submit(fetch_arxiv, settings)
-        f_feeds = executor.submit(fetch_feeds, settings)
+        f_biorxiv = executor.submit(fetch_biorxiv, settings, report)
+        f_arxiv = executor.submit(fetch_arxiv, settings, report)
+        f_feeds = executor.submit(fetch_feeds, settings, report)
         biorxiv = f_biorxiv.result()
         arxiv = f_arxiv.result()
         feeds = f_feeds.result()
 
-    feeds = _enrich_abstracts(feeds)
+    # Only look up abstracts for papers we have not already ingested.
+    feeds = _enrich_abstracts([p for p in feeds if p["doi"] not in existing_dois])
 
     # Dedup: prefer biorxiv > arxiv > feed
     seen_dois: dict[str, dict] = {}
@@ -499,6 +529,14 @@ def fetch_all(settings: Settings) -> list[dict]:
                 seen_dois[doi] = paper
         else:
             seen_dois[doi] = paper
+
+    for stats in report.values():
+        stats.update(new=0, full_abstract=0)
+    for paper in seen_dois.values():
+        stats = report.get(paper.get("feed"))
+        if stats is not None:
+            stats["new"] += 1
+            stats["full_abstract"] += len(paper["abstract"]) >= SHORT_ABSTRACT_LEN
 
     pending = load_pending()
     for paper in pending:

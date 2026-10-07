@@ -23,6 +23,8 @@
   --green-bg: #d9f0d3;
   --amber: #df8e1d;
   --amber-bg: #f5e4c0;
+  --red: #d20f39;
+  --red-bg: #f6d5dc;
   --grey: #8c8fa1;
   --grey-bg: #bcc0cc;
   --seen-bg: #dce0e8;
@@ -50,6 +52,8 @@
   --green-bg: #243329;
   --amber: #eed49f;
   --amber-bg: #332e1e;
+  --red: #ed8796;
+  --red-bg: #3a2228;
   --grey: #6e738d;
   --grey-bg: #363a4f;
   --seen-bg: #1e2030;
@@ -69,8 +73,22 @@ body { font-family: var(--font); background: var(--bg); color: var(--fg); font-s
 .container { max-width: 1240px; margin: 0 auto; padding: 28px 32px; }
 
 header { padding-bottom: 18px; margin-bottom: 24px; border-bottom: 1px solid var(--border); display: flex; align-items: flex-start; justify-content: space-between; }
-.header-left { display: flex; align-items: center; gap: 10px; }
+.header-left { display: flex; align-items: flex-start; gap: 10px; }
 .header-left h1 { font-size: 22px; font-weight: 800; letter-spacing: -0.6px; color: var(--fg); line-height: 1.2; }
+.health { font-size: 11.5px; font-family: var(--mono); margin-top: 6px; color: var(--muted); }
+.health summary { cursor: pointer; list-style: none; display: inline-flex; align-items: center; gap: 6px; }
+.health summary::-webkit-details-marker { display: none; }
+.health .hdot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex-shrink: 0; }
+.health-warn summary { color: var(--amber); }
+.health-warn .hdot { background: var(--amber); }
+.health-error summary { color: var(--red); }
+.health-error .hdot { background: var(--red); }
+.health ul { margin: 6px 0 2px; padding: 8px 12px 8px 26px; border-radius: var(--radius-sm); background: var(--card-bg); border: 1px solid var(--border); max-width: 720px; }
+.health li { margin: 2px 0; }
+.health li.sev-error { color: var(--red); }
+.health li.sev-warn { color: var(--amber); }
+.health li.sev-info { color: var(--muted); }
+.health .hnote { color: var(--muted); list-style: none; margin-left: -14px; margin-top: 6px; }
 .summary { font-size: 11.5px; color: var(--muted); margin-top: 2px; font-family: var(--mono); letter-spacing: 0.1px; }
 
 .layout { display: flex; align-items: flex-start; }
@@ -200,6 +218,17 @@ kbd { display: inline-block; padding: 1px 6px; border: 1px solid var(--border); 
       <div>
         <h1>Literature Sieve</h1>
         <div class="summary" id="summary-line">{{ summary.unread }} unread on feed · {{ summary.rl_unread }} unread on list · {{ summary.high_score }} scored &ge;{{ display_threshold }} · last fetched {{ summary.last_fetched or 'never' }} · generated {{ generated_at }} · v{{ sieve_version }}</div>
+        {% if health %}
+        <details class="health health-{{ health.level }}"{% if health.problems %} open{% endif %}>
+          <summary><span class="hdot"></span>{{ health.summary() }}{% if health.last_run %} · last run {{ health.last_run.run_at[5:16]|replace('T', ' ') }} ({{ health.last_run.trigger }}){% endif %}{% if health.issues %} ▸{% endif %}</summary>
+          {% if health.issues %}
+          <ul>
+            {% for issue in health.issues %}<li class="sev-{{ issue.severity }}">{{ issue.message }}</li>{% endfor %}
+            <li class="hnote">Run <code>sieve health</code> for the per-source table.</li>
+          </ul>
+          {% endif %}
+        </details>
+        {% endif %}
       </div>
     </div>
     <div style="display:flex;gap:8px;align-items:center;">

@@ -251,19 +251,22 @@ def _envelope_error(stdout: str) -> str | None:
     return None
 
 
-def _log_call_stats(stdout: str, batch_idx: int, stage: str) -> None:
+def _log_call_stats(stdout: str, batch_idx: int, stage: str) -> list[str]:
     """Log which model actually answered (aliases like "haiku" float to the
-    newest release), plus API time and cost, from the CLI's JSON envelope."""
+    newest release), plus API time and cost, from the CLI's JSON envelope.
+
+    Returns the model IDs used."""
     try:
         env = json.loads(stdout.strip())
-        models = ", ".join(env.get("modelUsage") or {}) or "unknown model"
+        models = list(env.get("modelUsage") or {})
         logger.info(
-            f"Batch {batch_idx} ({stage}): {models}, "
+            f"Batch {batch_idx} ({stage}): {', '.join(models) or 'unknown model'}, "
             f"{env.get('duration_api_ms', 0) / 1000:.1f}s API, "
             f"${env.get('total_cost_usd', 0):.4f}"
         )
+        return models
     except (json.JSONDecodeError, AttributeError, TypeError):
-        pass
+        return []
 
 
 def _run_claude(
@@ -274,8 +277,11 @@ def _run_claude(
     stage: str,
     claude_command: str = "claude",
     claude_env: dict[str, str] | None = None,
+    models: set[str] | None = None,
 ) -> list | None:
     """Run claude CLI and return parsed JSON from stdout, or None on failure.
+
+    Model IDs that answered are added to `models` if given.
 
     Retries transient failures. Raises ClaudeAuthError if the CLI is logged
     out, so callers can abort the whole run instead of burning every batch.
@@ -315,7 +321,9 @@ def _run_claude(
 
         parsed = _parse_stdout_result(result.stdout, batch_idx, stage)
         if parsed is not None:
-            _log_call_stats(result.stdout, batch_idx, stage)
+            used = _log_call_stats(result.stdout, batch_idx, stage)
+            if models is not None:
+                models.update(used)
             output_path.write_text(json.dumps(parsed))
             return parsed
 
@@ -341,6 +349,7 @@ def score_papers(
     haiku_callback=None,
     sonnet_callback=None,
     sonnet_start_callback=None,
+    stats: dict | None = None,
 ):
     """Score papers in batches using two-stage Haiku+Sonnet approach.
 
@@ -354,7 +363,13 @@ def score_papers(
     Optional callbacks called as batches complete:
       haiku_callback(done: int, total: int)
       sonnet_callback(done: int, total: int)
+
+    If `stats` is given it is filled with {"failed_batches": int, "models": set}
+    for the health check.
     """
+    stats = {} if stats is None else stats
+    stats.setdefault("failed_batches", 0)
+    stats.setdefault("models", set())
     STAGING_DIR.mkdir(parents=True, exist_ok=True)
     interests_path = PROJECT_ROOT / "config" / "interests.md"
     if not interests_path.exists():
@@ -418,6 +433,7 @@ def score_papers(
             "haiku",
             claude_command=settings.claude_command,
             claude_env=settings.claude_env,
+            models=stats["models"],
         )
         if result is not None:
             logger.info(f"Batch {i}: Haiku scored {len(result)} papers")
@@ -444,6 +460,7 @@ def score_papers(
         s1 = stage1_results.get(i)
         if s1 is None:
             failures += 1
+            stats["failed_batches"] += 1
             continue
         paper_by_doi = {p["doi"]: p for p in batch_data_list[i]}
         for s in s1:
@@ -496,6 +513,7 @@ def score_papers(
             "sonnet",
             claude_command=settings.claude_command,
             claude_env=settings.claude_env,
+            models=stats["models"],
         )
         if result is not None:
             logger.info(f"Sonnet batch {si}: wrote reasons for {len(result)} papers")
@@ -524,6 +542,7 @@ def score_papers(
                                 "reason": r.get("reason"),
                             }
                 else:
+                    stats["failed_batches"] += 1
                     logger.warning(
                         f"Sonnet batch {si}: failed, scores/reasons unavailable for that chunk"
                     )

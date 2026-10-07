@@ -7,6 +7,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 
 from . import db
+from .health import compute_health
 from .settings import PROJECT_ROOT, Settings
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
@@ -28,6 +29,11 @@ def build_site(settings: Settings) -> None:
         site_threshold=settings.site_threshold,
     )
 
+    try:
+        health = compute_health(settings)
+    except Exception:  # never let the health check block the site
+        health = None
+
     env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), autoescape=True)
     template = env.get_template("index.html.j2")
 
@@ -37,6 +43,7 @@ def build_site(settings: Settings) -> None:
         display_threshold=settings.display_threshold,
         generated_at=datetime.now().isoformat(timespec="seconds"),
         sieve_version=version("sieve"),
+        health=health,
     )
 
     (SITE_DIR / "index.html").write_text(html)
