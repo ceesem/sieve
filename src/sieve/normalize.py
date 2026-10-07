@@ -8,6 +8,11 @@ _PLACEHOLDER_RE = re.compile(
     re.IGNORECASE,
 )
 _MIN_ABSTRACT_LEN = 80
+# nature.com RSS "descriptions" lead with "<Journal>, Published online: <date>;
+# doi:<doi>" before a one-sentence teaser.
+_NATURE_PREFIX_RE = re.compile(
+    r"^.*?Published online:[^;]*;\s*doi:\S+\s*", re.IGNORECASE
+)
 
 
 def _clean_text(text: str) -> str:
@@ -23,7 +28,7 @@ def normalize_paper(paper: dict) -> dict:
     """Return a copy of paper with cleaned title and abstract."""
     p = dict(paper)
     p["title"] = _clean_text(p.get("title") or "").replace("\n", " ")
-    raw_abstract = _clean_text(p.get("abstract") or "")
+    raw_abstract = _NATURE_PREFIX_RE.sub("", _clean_text(p.get("abstract") or ""))
     if len(raw_abstract) < _MIN_ABSTRACT_LEN or _PLACEHOLDER_RE.match(raw_abstract):
         raw_abstract = ""
     p["abstract"] = raw_abstract

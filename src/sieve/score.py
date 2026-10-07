@@ -3,6 +3,7 @@ import json
 import logging
 import os
 import subprocess
+import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -16,6 +17,34 @@ STAGING_DIR = PROJECT_ROOT / "data" / "staging"
 # Cap on how many explicit negative examples are injected into the Sonnet
 # precision pass, to keep the per-batch prompt bounded.
 MAX_NEGATIVE_EXAMPLES = 40
+
+# Attempts per Claude CLI call. Transient API errors (dropped sockets, stream
+# timeouts) and occasional malformed JSON both clear up on a retry.
+CLAUDE_ATTEMPTS = 3
+
+_AUTH_ERROR_MARKERS = ("not logged in", "/login", "failed to authenticate", "401")
+
+
+class ClaudeAuthError(RuntimeError):
+    """The Claude CLI is not authenticated; retrying or continuing is pointless."""
+
+
+def _author_summary(authors: list[str] | None) -> str:
+    """First two + last author — enough to recognise a lab without bloating the prompt."""
+    authors = [a for a in (authors or []) if a]
+    if len(authors) <= 3:
+        return ", ".join(authors)
+    return f"{authors[0]}, {authors[1]}, …, {authors[-1]}"
+
+
+def _paper_payload(p: dict) -> dict:
+    return {
+        "doi": p["doi"],
+        "title": p["title"],
+        "journal": p.get("journal") or "",
+        "authors": _author_summary(p.get("authors")),
+        "abstract": p.get("abstract") or "",
+    }
 
 
 def _format_negative_examples(negatives: list[dict]) -> str:
@@ -68,13 +97,18 @@ Scoring rules:
   this paper. A solid but unremarkable paper in their field scores 5-6.
 - Score 8-10 for papers directly in their core topics or methods, or
   from a lab they explicitly follow.
-- Score 1-3 for papers in their explicit exclusion list.
+- Score 1-3 only for papers that fall squarely in their explicit exclusion
+  list. A paper that matches a core topic but also touches an exclusion is
+  a mixed case: score it 5-6 so the researcher still sees it, but it does
+  not rank among the strong matches.
 - When uncertain between two adjacent scores, prefer the higher score if
   the paper plausibly matches an important interest and is worth manual review.
 - It is acceptable for this pre-filter to include some false positives.
 - A slow news day is a slow news day. Do not inflate scores to fill a
   quota. Zero papers above 7 is a valid and correct output.
-- The title and abstract should dominate.
+- The title and abstract should dominate. Some papers (often from journal
+  feeds) have an empty abstract: score those on title, journal, and authors
+  alone, and do not penalise them for the missing abstract.
 - Papers from labs known to do strong work in relevant areas may receive
   a modest upward adjustment, but should not outweigh weak content.
 
@@ -127,7 +161,10 @@ Scoring rules (same as pre-filter):
   this paper. A solid but unremarkable paper in their field scores 5-6.
 - Score 8-10 for papers directly in their core topics or methods, or
   from a lab they explicitly follow.
-- Score 1-3 for papers in their explicit exclusion list.
+- Score 1-3 only for papers that fall squarely in their explicit exclusion
+  list. A paper that matches a core topic but also touches an exclusion is
+  a mixed case: score it 5-6 so the researcher still sees it, but it does
+  not rank among the strong matches.
 - A slow news day is a slow news day. Do not inflate scores.
 - Be more selective than the Haiku pre-filter when the evidence is weak
   or the match is indirect.
@@ -203,6 +240,17 @@ def _parse_stdout_result(stdout: str, batch_idx: int, stage: str) -> list | None
     return None
 
 
+def _envelope_error(stdout: str) -> str | None:
+    """Return the CLI's error message from a --output-format json envelope."""
+    try:
+        env = json.loads(stdout.strip())
+    except (json.JSONDecodeError, AttributeError):
+        return None
+    if isinstance(env, dict) and env.get("is_error"):
+        return str(env.get("result") or env.get("subtype") or "unknown error")
+    return None
+
+
 def _run_claude(
     model: str,
     prompt: str,
@@ -212,52 +260,63 @@ def _run_claude(
     claude_command: str = "claude",
     claude_env: dict[str, str] | None = None,
 ) -> list | None:
-    """Run claude CLI and return parsed JSON from stdout, or None on failure."""
-    try:
-        result = subprocess.run(
-            [
-                claude_command,
-                "-p",
-                "--model",
-                model,
-                "--tools",
-                "",
-                "--permission-mode",
-                "dontAsk",
-                "--output-format",
-                "json",
-                prompt,
-            ],
-            capture_output=True,
-            text=True,
-            timeout=600,
-            env={**os.environ, **(claude_env or {})},
-        )
+    """Run claude CLI and return parsed JSON from stdout, or None on failure.
+
+    Retries transient failures. Raises ClaudeAuthError if the CLI is logged
+    out, so callers can abort the whole run instead of burning every batch.
+    """
+    for attempt in range(1, CLAUDE_ATTEMPTS + 1):
+        if attempt > 1:
+            time.sleep(15 * (attempt - 1))
+        try:
+            result = subprocess.run(
+                [
+                    claude_command,
+                    "-p",
+                    "--model",
+                    model,
+                    "--tools",
+                    "",
+                    "--permission-mode",
+                    "dontAsk",
+                    "--output-format",
+                    "json",
+                    prompt,
+                ],
+                capture_output=True,
+                text=True,
+                timeout=600,
+                env={**os.environ, **(claude_env or {})},
+            )
+        except subprocess.TimeoutExpired:
+            logger.error(
+                f"Batch {batch_idx} ({stage}): Claude CLI timed out "
+                f"(attempt {attempt}/{CLAUDE_ATTEMPTS})"
+            )
+            continue
+        except OSError as e:
+            logger.error(f"Batch {batch_idx} ({stage}): could not run Claude CLI — {e}")
+            return None
 
         parsed = _parse_stdout_result(result.stdout, batch_idx, stage)
         if parsed is not None:
             output_path.write_text(json.dumps(parsed))
             return parsed
 
-        logger.error(f"Batch {batch_idx} ({stage}): Claude returned invalid JSON")
-        if result.returncode != 0:
-            logger.error(f"returncode: {result.returncode}")
-        if result.stderr:
-            logger.error(
-                f"stderr: {result.stderr[:500] if result.stderr else '(empty)'}"
-            )
-        if result.stdout:
-            logger.error(
-                f"stdout: {result.stdout[:500] if result.stdout else '(empty)'}"
-            )
-        return None
-
-    except subprocess.TimeoutExpired:
-        logger.error(f"Batch {batch_idx} ({stage}): Claude CLI timed out")
-        return None
-    except (json.JSONDecodeError, Exception) as e:
-        logger.error(f"Batch {batch_idx} ({stage}): error — {e}")
-        return None
+        error = _envelope_error(result.stdout)
+        if error and any(m in error.lower() for m in _AUTH_ERROR_MARKERS):
+            raise ClaudeAuthError(error)
+        logger.error(
+            f"Batch {batch_idx} ({stage}): Claude call failed "
+            f"(attempt {attempt}/{CLAUDE_ATTEMPTS}, returncode {result.returncode}): "
+            f"{error or 'invalid JSON in response'}"
+        )
+        if not error:
+            if result.stderr:
+                logger.error(f"stderr: {result.stderr[:500]}")
+            if result.stdout:
+                logger.error(f"stdout: {result.stdout[-500:]}")
+    return None
 
 
 def score_papers(
@@ -317,14 +376,7 @@ def score_papers(
     # Write all batch inputs upfront so workers can read them immediately.
     batch_data_list = []
     for i, batch in enumerate(batches):
-        batch_data = [
-            {
-                "doi": p["doi"],
-                "title": p["title"],
-                "abstract": p.get("abstract", ""),
-            }
-            for p in batch
-        ]
+        batch_data = [_paper_payload(p) for p in batch]
         (STAGING_DIR / f"to_score_{i}.json").write_text(
             json.dumps(batch_data, indent=2)
         )
@@ -358,11 +410,15 @@ def score_papers(
     stage1_results: dict[int, list | None] = {}
     with ThreadPoolExecutor(max_workers=4) as executor:
         futures = {executor.submit(_haiku_batch, i): i for i in range(len(batches))}
-        for future in as_completed(futures):
-            i, result = future.result()
-            stage1_results[i] = result
-            if haiku_callback:
-                haiku_callback(len(stage1_results), len(batches))
+        try:
+            for future in as_completed(futures):
+                i, result = future.result()
+                stage1_results[i] = result
+                if haiku_callback:
+                    haiku_callback(len(stage1_results), len(batches))
+        except ClaudeAuthError:
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise
 
     # --- Stage 2: Sonnet reasoning ---
     # Collect survivors across all Haiku batches in order, then rechunk at
@@ -437,8 +493,12 @@ def score_papers(
                 executor.submit(_sonnet_batch, si): si
                 for si in range(len(sonnet_batches))
             }
-            for future in as_completed(futures):
-                si, result = future.result()
+            try:
+                completed = [f.result() for f in as_completed(futures)]
+            except ClaudeAuthError:
+                executor.shutdown(wait=False, cancel_futures=True)
+                raise
+            for si, result in completed:
                 completed_sonnet += 1
                 if result:
                     for r in result:
@@ -511,9 +571,7 @@ def annotate_papers(
 
     batch_data = [
         {
-            "doi": p["doi"],
-            "title": p["title"],
-            "abstract": (p.get("abstract") or ""),
+            **_paper_payload(p),
             "score": p.get("score", 5),
             "match_basis": p.get("match_basis"),
         }

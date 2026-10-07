@@ -9,7 +9,9 @@ PROJECT_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent
 @dataclass
 class FeedConfig:
     name: str
-    url: str
+    url: str = ""
+    # When set, fetch via CrossRef by ISSN instead of RSS (for bot-walled feeds).
+    issn: str | None = None
 
 
 @dataclass

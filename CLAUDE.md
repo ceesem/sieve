@@ -52,7 +52,7 @@ Scoring invokes `claude -p` with batches of ~30 papers. Papers + scores are inse
 
 - **bioRxiv REST API** — paginated, filtered by category
 - **arXiv RSS** — `https://rss.arxiv.org/rss/{category}` (latest day only)
-- **Journal RSS feeds** — configured in settings.yaml
+- **Journal RSS feeds** — configured in settings.yaml; feeds with `issn:` instead of `url:` are fetched from the CrossRef API (Cell Press RSS is behind a Cloudflare challenge)
 - **Semantic Scholar API** — optional abstract enrichment for RSS entries
 - **Claude Code CLI** — must be installed and authenticated (`claude -p`)
 - **SQLite** — `data/papers.db` (stdlib sqlite3, no ORM)
@@ -61,6 +61,7 @@ Scoring invokes `claude -p` with batches of ~30 papers. Papers + scores are inse
 
 - All DB access through `db.py` helper functions
 - Atomic ingest: `insert_papers_with_scores()` handles both in one transaction
-- Per-batch error handling in scoring: if one batch fails, others still run
+- Per-batch error handling in scoring: if one batch fails, others still run; Claude calls retry transient errors, and a logged-out CLI aborts the run (`ClaudeAuthError`)
+- Papers fetched but not scored go to `data/pending.json` and are retried on later runs (up to 5 attempts)
 - Server returns `{status: ok/error}` with HTTP 200 for all POSTs
 - Static site works read-only without server; actions need `sieve serve`

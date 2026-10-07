@@ -1,4 +1,7 @@
+import json
 import logging
+import subprocess
+import sys
 import threading
 import time
 import webbrowser
@@ -7,10 +10,10 @@ from pathlib import Path
 
 from . import db
 from .cite import fetch_citation_graph
-from .fetch import fetch_all
+from .fetch import fetch_all, save_pending
 from .generate import build_bibliography, build_site
 from .ingest import ingest_batch
-from .score import score_papers
+from .score import ClaudeAuthError, score_papers
 from .seed import learn as learn_interests
 from .seed import seed as seed_paper
 from .settings import load_settings
@@ -97,19 +100,24 @@ def _score_ingest_build(papers, settings, progress, console):
     total_inserted = 0
     total_high = 0
 
-    for batch_papers, batch_scores in score_papers(
-        papers,
-        settings,
-        haiku_callback=_on_haiku,
-        sonnet_callback=_on_sonnet,
-        sonnet_start_callback=_on_sonnet_start,
-    ):
-        total_inserted += ingest_batch(batch_papers, batch_scores, run_timestamp)
-        total_high += sum(
-            1
-            for s in batch_scores.values()
-            if (s.get("score") or 0) >= settings.display_threshold
-        )
+    scored_dois: set[str] = set()
+    try:
+        for batch_papers, batch_scores in score_papers(
+            papers,
+            settings,
+            haiku_callback=_on_haiku,
+            sonnet_callback=_on_sonnet,
+            sonnet_start_callback=_on_sonnet_start,
+        ):
+            total_inserted += ingest_batch(batch_papers, batch_scores, run_timestamp)
+            scored_dois.update(batch_scores)
+            total_high += sum(
+                1
+                for s in batch_scores.values()
+                if (s.get("score") or 0) >= settings.display_threshold
+            )
+    finally:
+        save_pending([p for p in papers if p["doi"] not in scored_dois])
 
     progress.update(haiku_task, description="[green]✓[/green] Haiku triage")
     progress.update(
@@ -154,6 +162,10 @@ def run(args=None) -> None:
         console=console,
     )
 
+    if not _wait_for_network(console):
+        console.print("[red]No network — skipping this run.[/red]")
+        sys.exit(1)
+
     with progress:
         fetch_task = progress.add_task("Fetching papers…", total=None)
         try:
@@ -188,6 +200,34 @@ def run(args=None) -> None:
         f"\nProcessed [bold]{total_inserted}[/bold] papers · "
         f"[bold cyan]{total_high}[/bold cyan] above threshold (≥{settings.display_threshold})"
     )
+
+
+def _notify(title: str, message: str) -> None:
+    """Best-effort macOS notification — `sieve run` usually runs unattended."""
+    if sys.platform != "darwin":
+        return
+    script = (
+        f"display notification {json.dumps(message)} with title {json.dumps(title)}"
+    )
+    try:
+        subprocess.run(["osascript", "-e", script], timeout=10, capture_output=True)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def _wait_for_network(console, attempts: int = 10, delay: float = 30) -> bool:
+    """Wait for DNS/network after wake from sleep, when launchd fires the job."""
+    import httpx
+
+    for i in range(attempts):
+        try:
+            httpx.head("https://api.biorxiv.org", timeout=10)
+            return True
+        except httpx.HTTPError:
+            if i == 0:
+                console.print("[yellow]Network unavailable — waiting…[/yellow]")
+            time.sleep(delay)
+    return False
 
 
 def _find_free_port(start: int = 8000, end: int = 8020) -> int:
@@ -590,4 +630,15 @@ def main() -> None:
         "clean": clean,
         "export": export,
     }
-    dispatch[args.command](args)
+    try:
+        dispatch[args.command](args)
+    except ClaudeAuthError as e:
+        from rich.console import Console
+
+        msg = f"Claude CLI is not authenticated ({e}). Fetched papers are queued for the next run."
+        Console().print(f"\n[red]{msg}[/red]")
+        logger.error(msg)
+        _notify(
+            "sieve: Claude login needed", "Run `claude` and /login, then `sieve run`."
+        )
+        sys.exit(1)

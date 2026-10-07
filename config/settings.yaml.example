@@ -36,6 +36,9 @@ arxiv_categories:
 # Email for OpenAlex polite pool (optional but recommended)
 mailto: "you@example.com"
 
+# Each feed takes either an RSS `url`, or an `issn` to pull recent articles
+# from the CrossRef API instead (for publishers whose RSS is bot-blocked,
+# e.g. Cell Press: `issn: "0896-6273"` for Neuron).
 feeds:
   - name: "Nature Neuroscience"
     url: "https://www.nature.com/neuro.rss"
